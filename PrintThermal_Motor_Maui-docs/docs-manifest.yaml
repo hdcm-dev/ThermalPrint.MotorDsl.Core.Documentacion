@@ -1,0 +1,185 @@
+# =============================================================================
+# docs-manifest.yaml — Manifiesto máquina-legible de la documentación de MotorDsl
+# Marco de Documentación de Software §12.2. Un agente calcula el gap documental
+# (required_docs − existentes − vencidos) de forma determinística leyendo este archivo.
+# Generado por: /IA.Prompting.Templates/Tool-Prompts/Documentar-Fuentes-Software.md
+# Origen indexado: v1.0.13 @83677eb · Estado: draft (revisión humana pendiente)
+# =============================================================================
+
+solution:
+  name: MotorDsl
+  repo_name: PrintThermal_Motor_Maui
+  repo: https://github.com/Aplicada-Streaming/PrintThermal_Motor_Maui
+  regulated: false          # no activa el perfil A.17 (dominio regulado)
+  source_ref: v1.0.13 @83677eb
+  version_strategy: unified # los 7 paquetes comparten versión (ver GLOSSARY: "Versión unificada")
+  docs_root: PrintThermal_Motor_Maui-docs/
+  ia_db: ia-db/
+
+# -----------------------------------------------------------------------------
+# Piezas de la solución con su type (Marco §7.1) y required_docs.
+# state: draft = documentación generada por este pipeline, pendiente de revisión.
+# -----------------------------------------------------------------------------
+pieces:
+  - id: MotorDsl.Core
+    type: library
+    tfm: [net10.0]
+    path: src/MotorDsl.Core/
+    criticality: high
+    depends_on: []
+    required_docs: [readme, api-reference, usage-guide]
+    generated_docs: [readme, api-reference]
+    ia_db_index: [01_nucleo-pipeline, 02_dsl-y-modelos]
+
+  - id: MotorDsl.Parser
+    type: library
+    tfm: [net10.0]
+    path: src/MotorDsl.Parser/
+    criticality: high
+    depends_on: [MotorDsl.Core]
+    required_docs: [readme, api-reference, usage-guide]
+    generated_docs: [readme, api-reference]
+    ia_db_index: [02_dsl-y-modelos]
+
+  - id: MotorDsl.Rendering
+    type: library
+    tfm: [net10.0]
+    path: src/MotorDsl.Rendering/
+    criticality: high
+    depends_on: [MotorDsl.Core]
+    required_docs: [readme, api-reference, usage-guide]
+    generated_docs: [readme, api-reference]
+    ia_db_index: [03_renderizado-base]
+
+  - id: MotorDsl.Extensions
+    type: library
+    tfm: [net10.0]
+    path: src/MotorDsl.Extensions/
+    criticality: medium
+    depends_on: [MotorDsl.Core, MotorDsl.Parser, MotorDsl.Rendering]
+    required_docs: [readme, api-reference, usage-guide]
+    generated_docs: [readme, api-reference]
+    ia_db_index: [03_renderizado-base]
+
+  - id: MotorDsl.Printing.Abstractions
+    type: library
+    tfm: [net10.0]
+    path: src/MotorDsl.Printing.Abstractions/
+    criticality: high
+    depends_on: [MotorDsl.Core]
+    required_docs: [readme, api-reference, usage-guide, extension-guide]
+    generated_docs: [readme, api-reference, extension-guide]
+    ia_db_index: [04_impresion-transports]
+
+  - id: MotorDsl.Bluetooth
+    type: library
+    tfm: [net10.0-android, net10.0-ios]
+    path: src/MotorDsl.Bluetooth/
+    criticality: high
+    depends_on: [MotorDsl.Printing.Abstractions]
+    required_docs: [readme, api-reference, platform-notes]
+    generated_docs: [readme, api-reference, platform-notes]
+    ia_db_index: [04_impresion-transports]
+
+  - id: MotorDsl.Maui
+    type: component-library
+    tfm: [net10.0-android, net10.0-ios]
+    path: src/MotorDsl.Maui/
+    criticality: high
+    depends_on: [MotorDsl.Core, MotorDsl.Rendering, MotorDsl.Extensions, MotorDsl.Printing.Abstractions]
+    required_docs: [readme, component-catalog, usage-guide]
+    generated_docs: [readme, component-catalog, usage-guide]
+    ia_db_index: [05_maui-ui-renderers]
+
+  # --- Piezas de apoyo (no publicadas). type extendido para esta solución. ---
+  - id: MotorDsl.Tests
+    type: test-suite         # extensión del Marco (§7 es extensible)
+    tfm: [net10.0]
+    path: src/MotorDsl.Tests/
+    criticality: medium
+    depends_on: [MotorDsl.Core, MotorDsl.Parser, MotorDsl.Rendering, MotorDsl.Extensions, MotorDsl.Printing.Abstractions]
+    required_docs: [test-inventory]
+    generated_docs: [test-inventory]   # cubierto por ia-db/indexes/07_tests.md
+    ia_db_index: [07_tests]
+
+  - id: samples
+    type: sample-app         # extensión del Marco; fuente de snippets de integración (§13)
+    tfm: [net10.0-android, net10.0-ios]
+    path: samples/
+    criticality: low
+    members: [MotorDsl.SampleApp, MotorDsl.MultaApp, MotorDsl.Integrated.MultaApp, MotorDsl.Nuget.MultaApp, MotorDsl.Nuget.Integrated.MultaApp]
+    depends_on: [MotorDsl.Maui, MotorDsl.Bluetooth]
+    required_docs: [readme, integration-snippets]
+    generated_docs: [readme, integration-snippets]
+    ia_db_index: [06_samples]
+
+# -----------------------------------------------------------------------------
+# Documentos de nivel solución (Marco §5.2). Referencian a las piezas, no las duplican.
+# -----------------------------------------------------------------------------
+solution_docs:
+  - id: vision
+    path: docs/00-overview/vision.md
+    status: draft
+  - id: system-map
+    path: docs/00-overview/system-map.md
+    status: draft
+  - id: architecture-context     # C4 L1
+    path: docs/01-architecture/01-context.md
+    status: draft
+  - id: architecture-containers  # C4 L2
+    path: docs/01-architecture/02-containers.md
+    status: draft
+  - id: runtime-views
+    path: docs/01-architecture/04-runtime-views.md
+    status: draft
+  - id: extensibility            # transports + renderers custom
+    path: docs/01-architecture/06-crosscutting.md
+    status: draft
+  - id: adr-index
+    path: docs/04-decisions/README.md
+    status: draft
+  - id: drift-report
+    path: docs/04-decisions/reporte-derivas.md
+    status: draft
+  - id: api-catalog
+    path: docs/05-apis/catalog.md
+    status: draft
+  - id: developer-setup
+    path: docs/08-onboarding/developer-setup.md
+    status: draft
+  - id: gap-report
+    path: docs/gap-documental.md
+    status: draft
+
+# -----------------------------------------------------------------------------
+# Vocabulario de doc_types y su vigencia (Marco §12.2).
+# -----------------------------------------------------------------------------
+doc_types:
+  readme:              { path_pattern: "pieces/<id>/README.md",              max_age_days: 180 }
+  api-reference:       { path_pattern: "pieces/<id>/api-reference.md",       max_age_days: 120 }
+  usage-guide:         { path_pattern: "pieces/<id>/usage-guide.md",         max_age_days: 180 }
+  component-catalog:   { path_pattern: "pieces/<id>/component-catalog.md",   max_age_days: 120 }
+  extension-guide:     { path_pattern: "pieces/<id>/extension-guide.md",     max_age_days: 180 }
+  platform-notes:      { path_pattern: "pieces/<id>/platform-notes.md",      max_age_days: 180 }
+  integration-snippets:{ path_pattern: "pieces/samples/integration-snippets.md", max_age_days: 180 }
+  test-inventory:      { path_pattern: "ia-db/indexes/07_tests.md",          max_age_days: 180 }
+
+# -----------------------------------------------------------------------------
+# Gap documental declarado (Marco §5, §9). Lo NO generado se declara aquí, no se omite.
+# -----------------------------------------------------------------------------
+gap:
+  omitted_folders:        # carpetas del Marco §5.2 sin contenido reconstruible (omisión arc42)
+    - 02-requirements     # requisitos formales RF-/RNF- no reconstruidos; existe doc previa CU-/RN- en docs/ (ver 09_docs-existentes)
+    - 03-data             # la solución NO tiene base de datos propia; el "modelo" es el AST del DSL (documentado en 02-dsl-y-modelos)
+    - 05-deployment       # sin infraestructura desplegable (son librerías); CI/CD en ia-db/08_build-devops
+    - 06-security-compliance  # dominio no regulado; sin threat-model formal
+    - 07-operations       # sin runbooks operativos (librerías, no servicios en ejecución)
+  not_generated:
+    - changelog-per-piece # existe un CHANGELOG.md único a nivel solución (solo v1.0.13); no hay changelog por paquete
+    - openapi             # no aplica: no hay REST API en la solución (los samples consumen una API externa, fuera de alcance)
+    - migration-guide     # sin breaking changes documentados entre versiones (historia previa a 1.0.13 ausente en CHANGELOG)
+    - test-data-matrix    # §15 no solicitado (sin base de datos; sin {énfasis} de QA)
+  notes:
+    - "Existe documentación funcional previa extensa en docs/ (32 CU, reglas RN-/RC-, NB-); este pipeline la MAPEA (ia-db/09_docs-existentes) pero no la re-deriva a 02-requirements. Ver gap-documental.md."
+
+agent_policy: docs/09-agents/agent-policy.md

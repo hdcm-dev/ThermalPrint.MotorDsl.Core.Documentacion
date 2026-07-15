@@ -1,0 +1,49 @@
+# Changelog
+
+Todos los cambios notables de la **documentación de MotorDsl** se registran en este archivo.
+
+El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Este repositorio
+contiene el conjunto documental (`PrintThermal_Motor_Maui-docs`) y la base de conocimiento
+(`ia-db`) del repositorio de código [`PrintThermal_Motor_Maui`](https://github.com/Aplicada-Streaming/PrintThermal_Motor_Maui),
+generados conforme al Marco de Documentación de Software.
+
+## [Unreleased]
+
+## [1.0.0] - 2026-07-15
+
+Primera generación completa del conjunto documental por ingeniería inversa sobre el código en
+**v1.0.13 @83677eb**. Todo el material queda en `status: draft`, pendiente de revisión humana para
+promoverse a `approved`.
+
+### Añadido
+
+- **Base de conocimiento `ia-db/`**: punto de entrada único (`README.md`) más 9 índices temáticos
+  (núcleo/pipeline, DSL y modelos, renderizado base, impresión y transports, capa MAUI, samples,
+  tests, build/devops y mapa de la documentación previa).
+- **Índice maestro** `PrintThermal_Motor_Maui-docs/README.md`, `GLOSSARY.md` (vocabulario
+  controlado) y `docs-manifest.yaml` (manifiesto máquina-legible con el `type` de cada pieza y el
+  gap documental calculable).
+- **Documentación por pieza** (`pieces/`) de las 7 librerías y los samples:
+  - `MotorDsl.Core`, `MotorDsl.Parser`, `MotorDsl.Rendering`, `MotorDsl.Extensions`: README +
+    `api-reference`.
+  - `MotorDsl.Printing.Abstractions`: README + `api-reference` + `extension-guide`.
+  - `MotorDsl.Bluetooth`: README + `api-reference` + `platform-notes`.
+  - `MotorDsl.Maui`: README + `component-catalog` + `usage-guide`.
+  - `samples`: README + `integration-snippets` (snippets con procedencia, Marco §13).
+- **Nivel solución** (`docs/`): visión, C4 de contexto y contenedores, vistas de runtime con datos
+  sintéticos, conceptos transversales y extensibilidad, catálogo de APIs, 4 ADRs reconstruidos y la
+  política de agentes.
+- **Reporte de derivas** (`docs/04-decisions/reporte-derivas.md`): 17 contradicciones entre fuentes
+  y 17 observaciones de comportamiento del código, reportadas para decisión humana.
+- **Reporte de gap documental** (`docs/gap-documental.md`) con las omisiones declaradas (estilo
+  arc42) y su justificación.
+
+### Notas
+
+- El repositorio de código de origen no fue modificado (documentación de solo lectura).
+- Verificación: 0 enlaces relativos rotos; frontmatter completo en los 37 documentos del conjunto
+  documental (los índices de la `ia-db` abren con blockquote de propósito, sin frontmatter, según el
+  perfil de indexado).
+
+[Unreleased]: https://github.com/Aplicada-Streaming/PrintThermal_Motor_Maui.Documentacion/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Aplicada-Streaming/PrintThermal_Motor_Maui.Documentacion/releases/tag/v1.0.0
