@@ -9,6 +9,17 @@ generados conforme al Marco de Documentación de Software.
 
 ## [Unreleased]
 
+### Añadido
+
+- **Análisis UX/UI del flujo de impresión** (`Analisis/Analisis-UX-UI.md`): relevamiento de los flujos
+  de usuario de los PoC `Ejemplo_Maui_Hibrida` y `Ejemplo_MotorDSL_Dialog`, con 7 hallazgos
+  verificados contra el código fuente (`Ejemplos_Maui_Devices @fd6a1ed`, `PrintThermal_Motor_Maui`
+  v1.0.13 `@83677eb`) y propuestas de mejora sobre el patrón de diálogos overlay.
+- **Plan de correcciones UX de impresión** (`Analisis/Plan-Correcciones-UX-Impresion.md`): plan
+  ejecutado sobre ambos PoC, con el modelo de errores con código, la divergencia adoptada sobre H-5
+  y el resultado de la ejecución. La librería `MotorDsl.*` no fue modificada (sigue en v1.0.13).
+- Carpeta `PROMPTs/` para el material de generación documental.
+
 ## [1.0.0] - 2026-07-15
 
 Primera generación completa del conjunto documental por ingeniería inversa sobre el código en
