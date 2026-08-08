@@ -34,7 +34,7 @@
 | Dato | Valor |
 |---|---|
 | Proyecto | **MotorDsl** (repo `PrintThermal_Motor_Maui` / carpeta local `ThermalPrint.MotorDsl.Core`) |
-| Tipo | Librería .NET distribuida como **7 paquetes NuGet** + 5 apps MAUI de ejemplo |
+| Tipo | Librería .NET distribuida como **8 paquetes NuGet** + 5 apps MAUI de ejemplo |
 | Stack | .NET 10 · C# · .NET MAUI (Android/iOS) · xUnit · SkiaSharp · PdfSharpCore · QRCoder |
 | Repositorio | `origin` = `https://github.com/hdcm-dev/ThermalPrint.MotorDsl.Core.git`; los `.csproj` y el README declaran `RepositoryUrl` = `https://github.com/Aplicada-Streaming/PrintThermal_Motor_Maui` |
 | Versión indexada | `1.0.13` (CHANGELOG) · rama `main` · commit `83677eb` (2026-07-13) |

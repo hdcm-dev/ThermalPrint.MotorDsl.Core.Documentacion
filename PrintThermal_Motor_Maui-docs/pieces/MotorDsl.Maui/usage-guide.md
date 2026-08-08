@@ -45,7 +45,7 @@ dependencias transitivas (`MotorDsl.Core`, `Rendering`, `Extensions`, `Printing.
 </ItemGroup>
 ```
 
-> Versión **unificada**: los 7 paquetes se publican con la misma versión para evitar el downgrade
+> Versión **unificada**: los 8 paquetes se publican con la misma versión para evitar el downgrade
 > NU1605 (GLOSSARY: "Versión unificada"). Las dependencias NuGet nativas de `MotorDsl.Maui`
 > (`SkiaSharp.Views.Maui.Controls 3.119.2`, `PdfSharpCore 1.3.67`, `QRCoder 1.8.0`) llegan
 > transitivamente (`MotorDsl.Maui.csproj#L48-L52`).

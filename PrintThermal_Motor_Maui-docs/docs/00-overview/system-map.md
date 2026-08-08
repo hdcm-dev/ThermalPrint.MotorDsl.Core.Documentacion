@@ -21,7 +21,7 @@ source_ref: v1.0.13 @83677eb
 **MotorDsl** (repositorio `PrintThermal_Motor_Maui`) es una solución de **librerías .NET 10**
 que genera documentos a partir de un **DSL JSON** y los renderiza a **texto, ESC/POS, PDF y
 preview raster**, con foco en **impresión térmica Bluetooth SPP** desde aplicaciones **.NET MAUI**.
-Se distribuye como **7 paquetes NuGet** versionados en conjunto, acompañados de **5 aplicaciones
+Se distribuye como **8 paquetes NuGet** versionados en conjunto, acompañados de **5 aplicaciones
 de ejemplo** MAUI y una suite de **tests xUnit**.
 
 Este documento inventaría cada pieza con su `type` (Marco §7.1), tecnología, dependencias y

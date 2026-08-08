@@ -34,6 +34,7 @@ existente, no una decisión tomada en el momento. Un humano debe validarlos ante
 | [ADR-0002](ADR-0002-extensibilidad-target-kind.md) | Extensibilidad por `Target` (renderers) y `Kind` (transports) | draft (reconstruido) | ARCH-CC-001 |
 | [ADR-0003](ADR-0003-dos-formatos-dsl.md) | Dos formatos de DSL: *classic* e *integrated* | draft (reconstruido) | — |
 | [ADR-0004](ADR-0004-capacidades-tri-estado.md) | Capacidades de impresora tri-estado y detección best-effort | draft (reconstruido) | — |
+| [ADR-0005](ADR-0005-transport-red-net10-puro.md) | Transport de red en un paquete `net10.0` puro para habilitar iOS | draft | ADR-0002, ARCH-CC-001 |
 
 ## Decisiones históricas no reconstruidas
 

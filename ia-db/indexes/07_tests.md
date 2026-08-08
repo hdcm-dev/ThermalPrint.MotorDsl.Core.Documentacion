@@ -13,17 +13,20 @@
 |---|---|---|
 | Framework | xUnit 2.9.3 + `Microsoft.NET.Test.Sdk` 17.14.1 + `coverlet.collector` 6.0.4 | `MotorDsl.Tests.csproj` |
 | TFM | `net10.0` (`IsPackable=false`) | `MotorDsl.Tests.csproj` |
-| Archivos de test | 31 + `TestFakes.cs` | `src/MotorDsl.Tests/` |
-| Atributos `[Fact]` / `[Theory]` | **251** (medido) | conteo sobre `src/MotorDsl.Tests/*.cs` |
+| Archivos de test | 35 + `TestFakes.cs` | `src/MotorDsl.Tests/` |
+| Atributos `[Fact]` / `[Theory]` | **285** (medido) | conteo sobre `src/MotorDsl.Tests/*.cs` |
+| Casos ejecutados | **306** (medido con `dotnet test`) | corrida en devcontainer `net10.0` |
 | Cobertura mínima exigida | 70 % | `docs/README.md` §Definition of Done |
 
-> **Discrepancia registrada, no resuelta**: el conteo de casos declarado varía según la fuente —
-> el job de CI se llama «185 tests — MotorDsl.Tests» (`ci.yml`) y `.github/copilot-instructions.md`
-> dice «212 tests (185 originales + 27 del formato integrado)», mientras que los atributos
-> `[Fact]`/`[Theory]` en el código suman 251. Los números no son directamente comparables: un
-> `[Theory]` expande a varios casos ejecutados y las etiquetas de CI/Copilot pueden haber quedado
-> desactualizadas. **Para el número real, ejecutar `dotnet test`**; no citar ninguno de los tres
-> como cifra oficial.
+> **Discrepancia resuelta**: el conteo declarado variaba según la fuente — `ci.yml` decía «185
+> tests» y `.github/copilot-instructions.md` dice «212 tests (185 originales + 27 del formato
+> integrado)», mientras los atributos del código sumaban 251. Se ejecutó `dotnet test`: **eran 259**
+> antes del transport de red y son **306** después. Los números nunca fueron comparables, porque un
+> `[Theory]` expande a varios casos ejecutados.
+>
+> `ci.yml` **dejó de declarar un número fijo**: un contador hardcodeado ahí se desactualiza en
+> cuanto se agrega un test, que es exactamente lo que había pasado. `copilot-instructions.md` sigue
+> con la cifra vieja.
 
 ---
 
@@ -115,6 +118,13 @@ Eso da cobertura a `ChunkBuffer`, `HasValidStatusFixedBits`, `ClassifyStatusResp
 `ParseStatusByte` y `NextPacingDecision` **sin contaminar el paquete NuGet con un target
 `net10.0`**. Es la razón por la que esa lógica vive separada del archivo principal del transport:
 si se mueve dentro de un bloque `#if ANDROID`, se pierde su cobertura.
+
+> **Contraste con `MotorDsl.Network`**: ese paquete es `net10.0` puro, así que **no necesita este
+> rodeo** — `MotorDsl.Tests` lo referencia con un `<ProjectReference>` normal y puede testear el
+> transport completo, no solo sus partes puras. `NetworkTransportTests` levanta un `TcpListener`
+> local que hace de impresora y verifica paridad byte a byte del payload. Es una de las ventajas
+> concretas de haber elegido un TFM sin sufijo de plataforma
+> (ver [04_impresion-transports](04_impresion-transports.md) §5-bis).
 
 `MotorDsl.Printing.Abstractions` expone además sus miembros `internal` al proyecto de tests
 (`<InternalsVisibleTo Include="MotorDsl.Tests" />`), lo que permite testear la semántica del ring

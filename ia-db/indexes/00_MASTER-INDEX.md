@@ -20,7 +20,7 @@ código de impresión (NB-01), estandarización (NB-02), cambios de documento si
 
 ---
 
-## 2. Los 7 paquetes NuGet
+## 2. Los 8 paquetes NuGet
 
 | Paquete | TFM | Rol | Depende de |
 |---|---|---|---|
@@ -29,14 +29,16 @@ código de impresión (NB-01), estandarización (NB-02), cambios de documento si
 | `MotorDsl.Rendering` | `net10.0` | `TextRenderer`, `EscPosRenderer`, `EscPosCommands` | Core |
 | `MotorDsl.Extensions` | `net10.0` | DI fluent: `AddMotorDslEngine`, `AddTemplates`, `AddProfiles`, `AddRenderer<T>` | Core, Parser, Rendering |
 | `MotorDsl.Printing.Abstractions` | `net10.0` | `IThermalPrinterTransport`, `IThermalPrinterService`, `ThermalPrinterService`, diagnóstico | Core |
+| `MotorDsl.Network` | `net10.0` | Transport de red TCP 9100 (RAW/JetDirect). Multiplataforma: **único camino de impresión en iOS** | Printing.Abstractions |
 | `MotorDsl.Bluetooth` | `net10.0-android;net10.0-ios` | Transport BT Classic SPP (Android). iOS lanza `PlatformNotSupportedException` | Printing.Abstractions |
 | `MotorDsl.Maui` | `net10.0-android;net10.0-ios` | Controles MAUI, renderers PDF / bitmap ESC/POS / raster preview, error handler, diagnóstico | Core, Rendering, Extensions, Printing.Abstractions |
 
 `MotorDsl.Tests` (`net10.0`, `IsPackable=false`) no se publica.
 
 **Instalación mínima para una app MAUI con impresión Bluetooth**: `MotorDsl.Maui` +
-`MotorDsl.Bluetooth`; los otros 5 llegan como dependencias transitivas
-(fuente: `README.md`, sección «TL;DR»).
+`MotorDsl.Bluetooth`; los demás llegan como dependencias transitivas
+(fuente: `README.md`, sección «TL;DR»). Para imprimir en **iOS** hay que agregar
+`MotorDsl.Network`: es el único transport que funciona ahí.
 
 ### Grafo de dependencias
 
@@ -50,6 +52,7 @@ graph TD
     Ext --> Rendering
     PA[MotorDsl.Printing.Abstractions] --> Core
     BT[MotorDsl.Bluetooth] --> PA
+    NET[MotorDsl.Network] --> PA
     Maui[MotorDsl.Maui] --> Core
     Maui --> Rendering
     Maui --> Ext
@@ -85,7 +88,7 @@ Detalle completo en [01_nucleo-pipeline](01_nucleo-pipeline.md).
 | ADR-0002 | Extensibilidad por `Target`/`Kind` string, no por herencia | Agregar renderer o transport no toca el orquestador | `ADR-0002-extensibilidad-target-kind.md`¹ |
 | ADR-0003 | Dos formatos de DSL: `template` (con placeholders) e `integrated` (pre-resuelto) | El backend puede resolver los datos y enviar un documento listo | `ADR-0003-dos-formatos-dsl.md`¹ |
 | ADR-0004 | Capacidades de impresora en **tri-estado** (`Unknown` / `NotDetected` / `Supported`) | «No contestó» nunca se confunde con «no lo soporta» | `ADR-0004-capacidades-tri-estado.md`¹ |
-| — | La versión **no** vive en los `.csproj`: se inyecta en build/pack | Los 7 paquetes comparten una versión unificada | `CHANGELOG.md`, `docs/09_devops/estrategia-versionado_v1.0.md` |
+| — | La versión **no** vive en los `.csproj`: se inyecta en build/pack | Los 8 paquetes comparten una versión unificada | `CHANGELOG.md`, `docs/09_devops/estrategia-versionado_v1.0.md` |
 | — | Sin dependencia de librerías ESC/POS externas | `EscPosRenderer` emite los bytes directamente | `src/MotorDsl.Rendering/EscPosRenderer.cs:9` |
 
 ¹ Los ADR viven en el repositorio de documentación hermano

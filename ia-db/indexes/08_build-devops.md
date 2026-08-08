@@ -45,9 +45,9 @@ dotnet build -t:Run -f net10.0-android \
 Esquema **SemVer**. Regla central: **la versión no vive en los `.csproj`** — se inyecta en
 build/pack vía `-p:PackageVersion` y `-p:MotorDslVersion`.
 
-**Versión unificada**: los 7 paquetes comparten siempre el mismo número. El script de publicación
+**Versión unificada**: los 8 paquetes comparten siempre el mismo número. El script de publicación
 calcula `versión unificada = max(next(patch) de cada paquete)` consultando el *flat container* de
-nuget.org. El motivo es evitar `NU1605` (downgrade de dependencia) en apps que mezclen los 7.
+nuget.org. El motivo es evitar `NU1605` (downgrade de dependencia) en apps que mezclen varios.
 
 `scripts/nuget/get-next-version.ps1` hace el auto-bump: consulta
 `https://api.nuget.org/v3-flatcontainer/<paquete>/index.json` (lectura sin API key), filtra
@@ -70,7 +70,7 @@ Historial de cambios en `CHANGELOG.md`, formato *Keep a Changelog*; la entrada v
 Es la ruta **completa** de publicación. Secuencia:
 
 1. Resuelve la API key desde `MOTORDSL_NUGET_API_KEY` o la pide por prompt.
-2. Calcula la versión unificada de los 7 paquetes.
+2. Calcula la versión unificada de los 8 paquetes.
 3. `restore` + `build -c Release` de las 7 librerías con la versión inyectada.
 4. `restore` + `dotnet test` de `MotorDsl.Tests` — **si fallan, aborta antes de publicar**.
 5. `dotnet pack` de las 7 a `./nupkg/`.
@@ -105,12 +105,17 @@ Resolución de versión en `cd-nuget.yml`: tag `v*` → el tag sin la `v`; `work
 input; cualquier otro push → `0.0.0-preview.<run_number>`. El `push` a nuget.org **solo** ocurre
 para tags `v*` o `workflow_dispatch`.
 
-> **Discrepancia registrada**: `cd-nuget.yml` restaura, compila y empaqueta **solo 4** proyectos
-> (`Core`, `Parser`, `Rendering`, `Extensions`) — el propio paso se llama «Pack los 4 proyectos de
-> la librería» —, mientras que el script local y `notas.md` publican **7**
-> (faltan `Printing.Abstractions`, `Bluetooth` y `Maui`, los tres con TFM de plataforma). Es un
-> hecho verificado en el archivo, no una interpretación: **la ruta de publicación completa hoy es
-> el script local**, no el workflow. No consta en el repositorio si es intencional.
+> **Discrepancia resuelta**: `cd-nuget.yml` empaquetaba **solo 4** proyectos. La causa era
+> estructural y no un descuido: el job corría en Linux, y `dotnet pack` de un proyecto multi-TFM
+> exige compilar todos sus TFM, pero el workload `ios` **no existe para Linux**
+> (`Workload ID ios isn't supported on this platform`; el build corta con `NETSDK1178`). Por eso
+> `Bluetooth` y `Maui` eran imposibles ahí. `Printing.Abstractions`, en cambio, sí era un descuido:
+> es `net10.0` puro.
+>
+> El workflow se reestructuró en cuatro jobs — `version`, `pack-managed` (6 paquetes `net10.0` en
+> el runner self-hosted), `pack-platform` (`Bluetooth` y `Maui` en `macos-15`) y `publish`, que
+> junta ambos artefactos, verifica que estén los 8 y hace push en orden de dependencias. La
+> publicación completa ya no depende del script local de Windows.
 
 ---
 
@@ -132,7 +137,7 @@ Los scripts son `.bat` / `.ps1`: están pensados para Windows.
 
 ## 7. Metadatos de paquete
 
-Comunes a los 7 `.csproj`: `Authors` (Fernando Rafael Filipuzzi; `MotorDsl.Bluetooth` declara
+Comunes a los 8 `.csproj`: `Authors` (Fernando Rafael Filipuzzi; `MotorDsl.Bluetooth` declara
 «UTN FRP TUP Aplicada 2025»), `PackageLicenseExpression = MIT`,
 `RepositoryUrl = https://github.com/Aplicada-Streaming/PrintThermal_Motor_Maui`,
 `PackageReadmeFile = README.md` (se incluye el README de la raíz),

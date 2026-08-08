@@ -1,9 +1,11 @@
 # 04 — Impresión y transports
 
 > **Propósito**: cómo los bytes llegan a la impresora física: el orquestador
-> `ThermalPrinterService`, el contrato de transport, el transport Bluetooth Classic SPP, la
-> detección de capacidades, el logo en memoria NV y el reporte de diagnóstico.
+> `ThermalPrinterService`, el contrato de transport, los dos transports publicados
+> (Bluetooth Classic SPP y red TCP), la detección de capacidades, el logo en memoria NV y el
+> reporte de diagnóstico.
 > **Fuentes primarias**: `src/MotorDsl.Printing.Abstractions/`, `src/MotorDsl.Bluetooth/`,
+> `src/MotorDsl.Network/`,
 > `docs/10_developer_guide/transports-y-extensibilidad.md`,
 > `docs/10_developer_guide/diagnostics.md`.
 > La generación de los bytes está en [03_renderizado-base](03_renderizado-base.md); la UI de
@@ -124,15 +126,21 @@ public interface IThermalPrinterTransport
 ```
 
 Los miembros de NV y `Capabilities` tienen **implementación default en la interfaz**: un transport
-nuevo (USB, TCP, BLE) solo implementa los cinco métodos base. Registro:
+nuevo (USB, BLE) solo implementa los cinco métodos base. Registro:
 
 ```csharp
-services.AddSingleton<IThermalPrinterTransport, WiFiPrinterTransport>();
+services.AddSingleton<IThermalPrinterTransport, MiTransport>();
 ```
 
-Varios transports pueden coexistir: el servicio rutea por `PrinterDevice.Kind`. Ejemplo completo
-paso a paso de un `WiFiPrinterTransport` (descubrimiento por subred, socket TCP, escritura,
-compilación condicional por plataforma, patrón fluent) en
+Varios transports pueden coexistir: el servicio rutea por `PrinterDevice.Kind`. El proyecto publica
+**dos**:
+
+| Paquete | `Kind` | Medio | Plataformas |
+|---|---|---|---|
+| `MotorDsl.Bluetooth` | `bluetooth` | Bluetooth Classic SPP | Solo Android (§5) |
+| `MotorDsl.Network` | `network` | Socket TCP al puerto 9100 | Android, iOS y escritorio (§5-bis) |
+
+Guía paso a paso para escribir uno propio en
 `docs/10_developer_guide/transports-y-extensibilidad.md` §3–§6.
 
 `PrinterProfile` (distinto de `DeviceProfile`, ver [02_dsl-y-modelos](02_dsl-y-modelos.md) §8)
@@ -187,6 +195,58 @@ targetea android/ios y no puede referenciarse desde `net10.0`. Ver [07_tests](07
 | `HasValidStatusFixedBits(b)` | Máscara `0b1001_0011`, esperado `0b0001_0010`. Descarta ruido y eco de la línea |
 | `ClassifyStatusResponse(byte?)` | `null` (timeout) → `NotDetected`; bits válidos → `Supported`; ruido → `NotDetected` |
 | `ParseStatusByte(byte?)` | `null` o bits inválidos → `Unknown`; bit3 (`0x08`, offline) → `Busy`; si no → `Ready` |
+
+---
+
+## 5-bis. `NetworkPrinterTransport` — red TCP 9100
+
+`Kind = "network"`. TFM **`net10.0` puro**, y esa es la propiedad central: al no llevar sufijo de
+plataforma es consumible desde `net10.0-android`, `net10.0-ios` y escritorio por herencia de TFM.
+Es el **único camino de impresión en iOS**, donde `MotorDsl.Bluetooth` lanza
+`PlatformNotSupportedException` (§5). Decisión y alternativas descartadas en
+`PrintThermal_Motor_Maui-docs/docs/04-decisions/ADR-0005-transport-red-net10-puro.md`.
+
+| Archivo | Contenido |
+|---|---|
+| `NetworkPrinterTransport.cs` | Ciclo de vida: `DiscoverAsync`, `ConnectAsync`, `WriteBytesAsync`, `DisconnectAsync`, `InvalidateConnection` |
+| `NetworkPrinterTransport.Endpoints.cs` | Lógica **pura**: `TryParseEndpoint` / `FormatEndpoint` |
+| `NetworkPrinterOptions.cs` | Endpoints conocidos, timeouts y tamaño de bloque |
+| `MotorDslNetworkServiceCollectionExtensions.cs` | `AddNetworkPrinterTransport(configure?)` |
+
+Sin `#if` en ningún archivo: `System.Net.Sockets` es BCL. Por eso `MotorDsl.Tests` lo referencia
+por `<ProjectReference>` y no por el enlace de fuente que necesita el transport Bluetooth
+(ver [07_tests](07_tests.md)).
+
+### Identificación del dispositivo
+
+`deviceId` es un endpoint: `192.168.1.50` (puerto 9100 por defecto), `192.168.1.50:9101` o
+`[fe80::1]:9100`. También admite nombres de host — la resolución la hace el socket, no el parser.
+`FormatEndpoint` produce la forma canónica y es la inversa exacta de `TryParseEndpoint`.
+
+### Escritura de bytes
+
+Replica el patrón de §5 para que un mismo documento salga igual por cualquier medio: `InitDelayMs`
+antes del primer bloque, **chunking de tamaño fijo** de 256 bytes vía `TransportChunking.ChunkBuffer`
+(helper público en `Printing.Abstractions`, compartido), un retardo de pacing por bloque con piso de
+1 ms, y `FinalDelayMs` al cerrar.
+
+> Sobre TCP el pacing es **conservador, no imprescindible**: el control de flujo real lo aporta el
+> protocolo. En SPP hace falta porque el perfil emula el canal de datos pero no las líneas RTS/CTS.
+
+### Errores
+
+`IOException` y `SocketException` se relanzan **sin envolver** y con `IsConnected = false`. No es
+estilo: `PrintError.FromException` mapea ambas a `Connection` —que reintenta— y envolverlas en
+`Exception` las degradaría a `Unknown`; y `ReconnectInternalAsync` del servicio solo reconecta si
+`IsConnected` quedó en false. El vencimiento de los timeouts propios se traduce a
+`TimeoutException`. `DisconnectAsync` **nunca lanza**.
+
+### Descubrimiento y capacidades
+
+`DiscoverAsync` devuelve los endpoints declarados en `NetworkPrinterOptions`, descartando en
+silencio los inválidos; no barre la subred. `Capabilities` devuelve `null` y los métodos NV usan
+los defaults del contrato: no hay sondeo `DLE EOT` en esta versión, así que el envío siempre usa
+pacing fijo. mDNS y detección de capacidades quedan como extensión.
 
 ---
 
@@ -264,8 +324,11 @@ Implementación MAUI (`MauiDiagnosticsReportProvider`) y el patrón de UI de tre
 | Orquestador | `src/MotorDsl.Printing.Abstractions/Services/ThermalPrinterService.cs` |
 | Modelos de impresión | `src/MotorDsl.Printing.Abstractions/Models/*.cs` |
 | Transport Bluetooth | `src/MotorDsl.Bluetooth/BluetoothPrinterTransport*.cs` |
+| Transport de red | `src/MotorDsl.Network/NetworkPrinterTransport*.cs` |
 | Handler por defecto | `src/MotorDsl.Core/Printing/DefaultPrintErrorHandler.cs` |
 | Guía de transports custom | `docs/10_developer_guide/transports-y-extensibilidad.md` |
 | Guía de diagnóstico | `docs/10_developer_guide/diagnostics.md` |
 | Perfiles reales | `docs/10_developer_guide/perfiles-impresoras-reales.md` |
 | Tests | `src/MotorDsl.Tests/{CapabilityDetectionTests,CU23CapabilityTests,ChunkBufferTests,StatusFlowControlTests,Phase4NvLogoTests,PrintErrorHandlerTests,PrintFailureLogTests,DiagnosticsBuilderTests}.cs` |
+| Tests del transport de red | `src/MotorDsl.Tests/{NetworkTransportTests,NetworkEndpointTests,NetworkTransportDiTests,TransportChunkingTests}.cs` |
+| Decisión de diseño | `PrintThermal_Motor_Maui-docs/docs/04-decisions/ADR-0005-transport-red-net10-puro.md` |

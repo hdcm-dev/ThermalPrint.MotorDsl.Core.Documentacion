@@ -69,7 +69,7 @@ source_ref: v1.0.13 @83677eb
 
 | Término | Definición | Fuente |
 |---|---|---|
-| **Versión unificada** | Los 7 paquetes se publican siempre con la misma versión = `max(next(patch))`, para evitar el *downgrade* NU1605. | `docs/09_devops/estrategia-versionado_v1.0.md`; `scripts/nuget/notas.md` |
+| **Versión unificada** | Los 8 paquetes se publican siempre con la misma versión = `max(next(patch))`, para evitar el *downgrade* NU1605. | `docs/09_devops/estrategia-versionado_v1.0.md`; `scripts/nuget/notas.md` |
 | **`MotorDslVersion`** | Propiedad MSBuild inyectada en build/pack para que los `.csproj` referencien la versión en los `PackageReference` internos. | `scripts/nuget/notas.md` |
 | **Auto-bump de patch** | `get-next-version.ps1` consulta el *flat container* de nuget.org y devuelve `X.Y.(Z+1)`; *fallback* `1.0.0` si el paquete no existe. | `scripts/nuget/get-next-version.ps1` |
 | **`EmbedAssembliesIntoApk`** | Flag obligatorio en el publish Android para que el APK firmado sea instalable vía `adb install`. | `scripts/mobile/Readme.md` |

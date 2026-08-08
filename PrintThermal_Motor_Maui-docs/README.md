@@ -26,7 +26,7 @@ source_ref: v1.0.13 @83677eb
 Motor de generación y renderizado de documentos para **.NET 10 / .NET MAUI**, orientado a la
 **impresión térmica ESC/POS por Bluetooth**. Un documento se describe una vez en un **DSL JSON** y se
 materializa en texto, ESC/POS, PDF o preview raster, eligiendo el formato por un **perfil de
-dispositivo**. Se distribuye como **7 paquetes NuGet** modulares, extensibles vía *renderers* (por
+dispositivo**. Se distribuye como **8 paquetes NuGet** modulares, extensibles vía *renderers* (por
 `Target`) y *transports* (por `Kind`). Detalle: [visión](docs/00-overview/vision.md).
 
 ## Cómo navegar

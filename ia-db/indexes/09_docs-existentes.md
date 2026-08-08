@@ -74,20 +74,28 @@ ThermalPrint.MotorDsl.Core.Documentacion/
 │   ├── docs/
 │   │   ├── 00-overview/              vision.md, system-map.md
 │   │   ├── 01-architecture/          01-context (C4 L1), 02-containers (C4 L2), 04-runtime-views, 06-crosscutting
-│   │   ├── 04-decisions/             ADR-0001…0004, README, reporte-derivas.md
+│   │   ├── 04-decisions/             ADR-0001…0005, README, reporte-derivas.md
 │   │   ├── 05-apis/catalog.md
 │   │   ├── 08-onboarding/developer-setup.md
 │   │   ├── 09-agents/agent-policy.md
 │   │   └── gap-documental.md
-│   └── pieces/                       Un subdirectorio por paquete: README, api-reference,
+│   └── pieces/                       Un subdirectorio por paquete (8 + samples): README, api-reference,
 │                                     usage-guide, component-catalog, extension-guide, platform-notes
-├── Analisis/                         Analisis-UX-UI.md, Plan-Correcciones-UX-Impresion.md, 03-Analisis-IOs/
+├── Analisis/                         Analisis-UX-UI.md, Plan-Correcciones-UX-Impresion.md,
+│                                     03-Analisis-IOs/Nuget-Multiplaforma.md
 ├── PROMPTs/                          Prompts de trabajo del usuario
 ├── CHANGELOG.md · README.md
 └── ia-db/                            ← esta base de conocimiento
 ```
 
-**Los 4 ADR viven aquí, no en el repositorio de código**: `PrintThermal_Motor_Maui-docs/docs/04-decisions/`.
+`Analisis/03-Analisis-IOs/Nuget-Multiplaforma.md` es la referencia para **soporte iOS y resolución
+multiplataforma de los paquetes**: explica cómo NuGet elige `lib/net10.0-android36.0/` o
+`lib/net10.0-ios26.0/` según el TFM que se esté compilando (verificado sobre los `.nupkg` de
+nuget.org), evalúa 5 alternativas de transporte para iOS y registra los hallazgos de CI/CD que
+motivaron el rediseño de `cd-nuget.yml`. Complementa a [08_build-devops](08_build-devops.md) §5 y
+a [04_impresion-transports](04_impresion-transports.md) §5-bis.
+
+**Los 5 ADR viven aquí, no en el repositorio de código**: `PrintThermal_Motor_Maui-docs/docs/04-decisions/`.
 Sus decisiones están resumidas en [00_MASTER-INDEX](00_MASTER-INDEX.md) §4.
 
 `docs-manifest.yaml` declara el estado de esa documentación como **`draft`** (generada por
@@ -136,7 +144,7 @@ Hechos verificados, sin interpretación añadida:
   mientras que los `.csproj`, el `README.md` y `docs-manifest.yaml` declaran
   `Aplicada-Streaming/PrintThermal_Motor_Maui`. Los enlaces del README apuntan a esta última.
 - **Conteo de tests inconsistente entre fuentes** (ver [07_tests](07_tests.md) §1).
-- **`cd-nuget.yml` empaqueta 4 de los 7 paquetes** (ver [08_build-devops](08_build-devops.md) §5).
+- **`cd-nuget.yml` empaqueta los 8 paquetes** repartidos en dos runners (ver [08_build-devops](08_build-devops.md) §5).
 - **`docs/README.md` menciona `scripts/docker`**, que no existe en el árbol; las carpetas reales
   son `local`, `mobile` y `nuget`.
 - **`.github/copilot-instructions.md` describe la estructura de forma desactualizada**: menciona
