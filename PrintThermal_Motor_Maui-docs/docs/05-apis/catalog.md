@@ -78,7 +78,7 @@ snippets: [integration-snippets](../../pieces/samples/integration-snippets.md).
 
 ## Política de versionado
 
-- **SemVer con versión unificada**: los 7 paquetes se publican con el mismo número; un consumidor
+- **SemVer con versión unificada**: los 8 paquetes se publican con el mismo número; un consumidor
   fija una sola versión para todo el stack (ver GLOSSARY: *Versión unificada*).
 - La versión **no** vive en los `.csproj`; se inyecta en build/pack. Detalle:
   [`ia-db 08`](../../../ia-db/indexes/08_build-devops.md).

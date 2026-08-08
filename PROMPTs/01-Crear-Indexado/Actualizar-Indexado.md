@@ -1,0 +1,1 @@
+Lee y ejecuta `/IA/IA.Prompts/Tool-Prompts/Indexado/Actualizar-Indexado.md` del workspace ia-db federada en `/DEV/SAI.Service.Core.Documentacion/ia-db`

@@ -18,6 +18,13 @@ generados conforme al Marco de Documentación de Software.
 - **Plan de correcciones UX de impresión** (`Analisis/Plan-Correcciones-UX-Impresion.md`): plan
   ejecutado sobre ambos PoC, con el modelo de errores con código, la divergencia adoptada sobre H-5
   y el resultado de la ejecución. La librería `MotorDsl.*` no fue modificada (sigue en v1.0.13).
+- **Análisis de soporte iOS y NuGet multiplataforma**
+  (`Analisis/03-Analisis-IOs/Nuget-Multiplaforma.md`): evaluación del desarrollo actual frente al
+  objetivo de dar soporte a dispositivos iOS, con 5 alternativas de transporte y su estructura de
+  solución resultante. Incluye la verificación empírica de cómo NuGet resuelve los assets por
+  plataforma, hecha sobre los `.nupkg` descargados de nuget.org (`MotorDsl.* 1.0.13`,
+  commit `ebe03ef`), y 5 hallazgos colaterales de CI/CD que condicionan la publicación. La
+  recomendación es un paquete `MotorDsl.Network` con TFM `net10.0` puro. No se modificó código.
 - Carpeta `PROMPTs/` para el material de generación documental.
 
 ## [1.0.0] - 2026-07-15

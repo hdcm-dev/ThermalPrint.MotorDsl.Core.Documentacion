@@ -86,7 +86,7 @@ controles MAUI). Ver [samples](../../pieces/samples/README.md).
 ## Empaquetado y publicación (mantenedores)
 
 - La versión **no** vive en los `.csproj`: se inyecta en build/pack (`-p:PackageVersion` /
-  `-p:MotorDslVersion`). Los 7 paquetes se publican con **versión unificada**.
+  `-p:MotorDslVersion`). Los 8 paquetes se publican con **versión unificada**.
 - Empaquetado local: `scripts/nuget/build-motordsl-nuget.bat`; publicación:
   `scripts/nuget/publish-motordsl-nuget.bat`.
 - Para probar paquetes recién empacados, `NuGet.config` declara la fuente local `./nupkg` antes de

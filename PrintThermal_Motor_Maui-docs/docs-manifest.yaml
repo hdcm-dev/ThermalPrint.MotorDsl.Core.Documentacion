@@ -12,7 +12,7 @@ solution:
   repo: https://github.com/Aplicada-Streaming/PrintThermal_Motor_Maui
   regulated: false          # no activa el perfil A.17 (dominio regulado)
   source_ref: v1.0.13 @83677eb
-  version_strategy: unified # los 7 paquetes comparten versión (ver GLOSSARY: "Versión unificada")
+  version_strategy: unified # los 8 paquetes comparten versión (ver GLOSSARY: "Versión unificada")
   docs_root: PrintThermal_Motor_Maui-docs/
   ia_db: ia-db/
 
@@ -69,6 +69,16 @@ pieces:
     depends_on: [MotorDsl.Core]
     required_docs: [readme, api-reference, usage-guide, extension-guide]
     generated_docs: [readme, api-reference, extension-guide]
+    ia_db_index: [04_impresion-transports]
+
+  - id: MotorDsl.Network
+    type: library
+    tfm: [net10.0]
+    path: src/MotorDsl.Network/
+    criticality: high
+    depends_on: [MotorDsl.Printing.Abstractions]
+    required_docs: [readme, api-reference, platform-notes]
+    generated_docs: [readme, api-reference, platform-notes]
     ia_db_index: [04_impresion-transports]
 
   - id: MotorDsl.Bluetooth
@@ -161,7 +171,7 @@ doc_types:
   component-catalog:   { path_pattern: "pieces/<id>/component-catalog.md",   max_age_days: 120 }
   extension-guide:     { path_pattern: "pieces/<id>/extension-guide.md",     max_age_days: 180 }
   platform-notes:      { path_pattern: "pieces/<id>/platform-notes.md",      max_age_days: 180 }
-  integration-snippets:{ path_pattern: "pieces/samples/integration-snippets.md", max_age_days: 180 }
+  integration-snippets: { path_pattern: "pieces/samples/integration-snippets.md", max_age_days: 180 }
   test-inventory:      { path_pattern: "ia-db/indexes/07_tests.md",          max_age_days: 180 }
 
 # -----------------------------------------------------------------------------

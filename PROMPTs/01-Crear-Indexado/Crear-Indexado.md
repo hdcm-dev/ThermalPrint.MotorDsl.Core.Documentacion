@@ -1,0 +1,1 @@
+Lee y ejecuta `/IA/IA.Prompts/Tool-Prompts/Indexado-Documentado/Iniciar-Indexado.md` de `/DEV/ThermalPrint.MotorDsl.Core` y deja la indexación en `/DEV/ThermalPrint.MotorDsl.Core.Documentacion/ia-db`
