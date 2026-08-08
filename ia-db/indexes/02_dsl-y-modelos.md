@@ -1,222 +1,231 @@
-# 02 — El DSL JSON y el modelo de documento
+# 02 — DSL y modelos
 
-> **Propósito**: índice destilado del lenguaje DSL (JSON) que consume el motor y de todos los modelos de datos que fluyen por el pipeline: nodos del AST, template, documentos intermedios, perfil de dispositivo y resultados.
-> **Fuentes primarias**: `src/MotorDsl.Core/Models/*.cs`, `src/MotorDsl.Parser/DslParser.cs`, `src/MotorDsl.Core/Validation/TemplateValidator.cs`.
-> **Versión del origen citada**: `v1.0.13 @83677eb`.
-> Pipeline y contratos: ver [01_nucleo-pipeline.md](./01_nucleo-pipeline.md). Renderers: ver [03_renderizado-base.md](./03_renderizado-base.md).
+> **Propósito**: la gramática del DSL JSON (tipos de nodo, bindings, estilos, condicionales), los
+> dos formatos de documento y las clases del AST que los representan en memoria.
+> **Fuentes primarias**: `docs/10_developer_guide/formato-dsl-templates.md`,
+> `docs/10_developer_guide/formato-perfiles-impresora.md`, `src/MotorDsl.Core/Models/`,
+> `src/MotorDsl.Parser/DslParser.cs`, `docs/10_developer_guide/ejemplos-templates/*.json`.
+> El recorrido del pipeline sobre estos modelos está en [01_nucleo-pipeline](01_nucleo-pipeline.md).
 
-## 1. Jerarquía de nodos del AST
+---
 
-```mermaid
-classDiagram
-    class DocumentNode {
-        <<abstract>>
-        +string Type
-        +List~DocumentNode~? Children
-        +Dictionary~string,object~? Properties
-        +StyleDefinition? Style
-        +AddChild(child)
-        +SetProperty(key, value)
-        +GetProperty(key)
-    }
-    class StyleDefinition {
-        +Dictionary~string,object~ Attributes
-    }
-    class TextNode {
-        +string Text
-        +string? BindPath
-    }
-    class ContainerNode {
-        +string? Layout
-    }
-    class ConditionalNode {
-        +string Expression
-        +DocumentNode? TrueBranch
-        +DocumentNode? FalseBranch
-    }
-    class LoopNode {
-        +string Source
-        +string ItemAlias
-        +DocumentNode? Body
-    }
-    class TableNode {
-        +List~string~ Headers
-        +List~List~string~~ Rows
-        +AddRow(cells)
-    }
-    class ImageNode {
-        +string Source
-        +int? Width
-        +int? Height
-        +string? ImageType
-        +string? Role
-    }
-    DocumentNode <|-- TextNode
-    DocumentNode <|-- ContainerNode
-    DocumentNode <|-- ConditionalNode
-    DocumentNode <|-- LoopNode
-    DocumentNode <|-- TableNode
-    DocumentNode <|-- ImageNode
-    DocumentNode --> StyleDefinition : Style
+## 1. Estructura raíz
+
+| Propiedad | Tipo | Obligatoria | Descripción |
+|---|---|---|---|
+| `id` | string | Sí | Identificador del template |
+| `version` | string | Sí | Versión del template (semántica libre) |
+| `root` | object | Sí | Nodo raíz (habitualmente un `container`) |
+| `format` | string | No | `"template"` (default) o `"integrated"` |
+| `metadata` | object | No | Información libre (autor, fecha, descripción) |
+
+```json
+{ "id": "mi-template", "version": "1.0", "root": { "type": "text", "text": "Hola mundo" } }
 ```
 
-| Clase | `type` JSON | Propiedades JSON que lee el parser | Semántica | Fuente modelo / parser |
-|---|---|---|---|---|
-| `DocumentNode` (abstracta) | — | `type` (obligatorio), `style` (objeto k/v, solo se parsea en `text`) | Base del AST: `Children`, `Properties` dinámicas, `Style` | `src/MotorDsl.Core/Models/DocumentNode.cs#L11-L85` / `src/MotorDsl.Parser/DslParser.cs#L113-L142` |
-| `TextNode` | `text` | classic: `text`; integrated: `value`; opcional `bindPath`, `style` | Texto plano o con placeholders `{{path}}` | `src/MotorDsl.Core/Models/TextNode.cs#L9-L34` / `DslParser.cs#L144-L186` |
-| `ContainerNode` | `container` | `layout` (`"vertical"`\|`"horizontal"`, default `"vertical"`), `children[]` | Agrupador estructural; el layout actual solo apila líneas | `src/MotorDsl.Core/Models/ContainerNode.cs#L9-L36` / `DslParser.cs#L188-L206` |
-| `ConditionalNode` | `conditional` | `expression`, `trueBranch`, `falseBranch` (nodos) | Inclusión condicional en runtime; sin `falseBranch` y condición falsa → el nodo se excluye | `src/MotorDsl.Core/Models/ConditionalNode.cs#L9-L40` / `DslParser.cs#L208-L223` |
-| `LoopNode` | `loop` | `source` (path a colección), `itemAlias`, `body` (nodo) | Repite `body` por cada ítem; el Evaluator lo expande a un `ContainerNode` vertical | `src/MotorDsl.Core/Models/LoopNode.cs#L9-L43` / `DslParser.cs#L225-L240` |
-| `TableNode` | `table` | `headers[]` (strings), `rows[][]` (strings) | Tabla; el LayoutEngine genera header + separador `---` + filas con anchos calculados | `src/MotorDsl.Core/Models/TableNode.cs#L10-L41` / `DslParser.cs#L242-L271` |
-| `ImageNode` | `image` | `source`, `width`, `height`, `imageType` (`"png"`\|`"jpeg"`\|`"qrcode"`\|`"barcode"`), `role` (`"logo"`\|`"signature"`) | Imagen, QR o código de barras; `role` rutea logo a recall NV vs inline (ver [03 §2](./03_renderizado-base.md)) | `src/MotorDsl.Core/Models/ImageNode.cs#L9-L54` / `DslParser.cs#L273-L297` |
+---
 
-Tipos soportados por el parser: exactamente `text, container, conditional, loop, table, image` (`DslParser.cs#L17-L25`); cualquier otro `type` lanza `ArgumentException` (`DslParser.cs#L125-L126`).
+## 2. Tipos de nodo
 
-**Nota**: el parser solo materializa `style` para nodos `text` (`DslParser.cs#L168-L183`); `bold`/`align` en `table` los lee el LayoutEngine desde `Style` pero el parser no lo llena para tablas — un `style` en un nodo `table` del JSON no se parsea («No verificado» que exista otra vía de asignarlo salvo por código).
-
-## 2. `DocumentTemplate` y los DOS formatos del DSL
-
-`src/MotorDsl.Core/Models/DocumentTemplate.cs#L9-L60`: `Id`, `Version`, `Root` (AST), `Metadata` (dict opcional) y el discriminador `Format` con constantes:
-
-- `FormatTemplate = "template"` (`#L12`) — **classic**, valor por defecto (backward compatible, `#L45`).
-- `FormatIntegrated = "integrated"` (`#L15`) — AST pre-resuelto; el motor salta la etapa Evaluate.
-
-### 2.1 Esquema raíz del JSON
-
-| Campo raíz | Obligatorio | Notas | Fuente |
+| `type` | Descripción | Obligatorias | Opcionales |
 |---|---|---|---|
-| `id` | sí | string no vacío | `DslParser.cs#L45-L51` |
-| `version` | sí | string no vacío | `DslParser.cs#L53-L59` |
-| `format` | no | `"template"` (default) o `"integrated"`; otro valor → `ArgumentException` | `DslParser.cs#L61-L74` |
-| `root` | sí | nodo raíz del AST | `DslParser.cs#L76-L81` |
-| `metadata` | no | objeto k/v (string/number/bool) | `DslParser.cs#L83-L99` |
+| `text` | Texto estático o con binding. Hoja. | `type` | `text` (o `value` en integrado), `bindPath`, `style` |
+| `container` | Agrupa hijos con un layout | `type` | `layout`, `children`, `style` |
+| `loop` | Itera una colección y repite `body` | `type`, `source`, `itemAlias` | `body` |
+| `conditional` | Incluye contenido si la expresión es verdadera | `type`, `expression` | `trueBranch`, `falseBranch` |
+| `table` | Tabla con encabezados y filas | `type` | `headers`, `rows`, `style` |
+| `image` | Imagen, QR o código de barras | `type`, `source` | `width`, `height`, `imageType`, `role`, `style` |
 
-### 2.2 Comparativa classic vs integrated
+`type` es obligatorio en **todos** los nodos: es el discriminador que usa `DslParser` para
+instanciar la clase correcta. Un `type` desconocido es error de validación (`UnknownNodeType`).
 
-| Aspecto | Classic (`"format":"template"`) | Integrated (`"format":"integrated"`) |
+### Ejemplos por tipo
+
+```json
+{ "type": "text", "text": "Cliente: {{cliente.nombre}}", "style": { "align": "left" } }
+
+{ "type": "container", "layout": "vertical",
+  "children": [ { "type": "text", "text": "Línea 1" }, { "type": "text", "text": "Línea 2" } ] }
+
+{ "type": "loop", "source": "items", "itemAlias": "item",
+  "body": { "type": "text", "text": "{{item.descripcion}}  {{item.precio}}" } }
+
+{ "type": "conditional", "expression": "total > 1000",
+  "trueBranch": { "type": "text", "text": "Envío gratis" },
+  "falseBranch": { "type": "text", "text": "Costo de envío: $500" } }
+
+{ "type": "table", "headers": ["Producto", "Cant", "Subtotal"],
+  "rows": [["Café", "2", "$800"], ["Té", "1", "$300"]] }
+
+{ "type": "image", "source": "https://ejemplo/pago/123", "imageType": "qrcode" }
+```
+
+`imageType` distingue el tratamiento en layout y render: `"qrcode"`, `"barcode"`, o bitmap cuando
+`source` empieza con `data:image/`. El campo opcional `role` (`"logo"` | `"signature"`) enruta el
+logo por *recall* de memoria NV cuando la impresora lo soporta; las firmas siempre van inline
+(ver [04_impresion-transports](04_impresion-transports.md)).
+
+---
+
+## 3. Bindings
+
+Sintaxis `{{path}}` dentro de `text`. El path admite campos simples, anidados (`cliente.nombre`)
+e indexación (`items[0].precio`). Varios bindings pueden convivir en un mismo string.
+
+Dentro de un `loop`, el `itemAlias` queda disponible como raíz del path
+(`{{item.descripcion}}`). `DataValidator` excluye los alias de loop de su chequeo de campos
+faltantes: se validan a nivel del loop, no del texto.
+
+Alternativa a `{{…}}`: la propiedad `bindPath` de un nodo `text`, que resuelve el valor
+directamente desde los datos.
+
+---
+
+## 4. Estilos
+
+Objeto `style` con atributos clave-valor. Los reconocidos por el pipeline:
+
+| Atributo | Valores | Efecto |
 |---|---|---|
-| Datos | Externos: se pasan como `object data` en `Render(dsl, data, profile)`; pueden venir de un `IDataProvider` | Embebidos: los valores ya están resueltos dentro del JSON; overload `Render(json, profile)` sin datos |
-| Texto | `"text"` con placeholders `{{path}}` | `"value"` con string final (el parser lee `value`, no `text`: `DslParser.cs#L146-L160`) |
-| `loop` / `conditional` | Permitidos; el Evaluator los expande/resuelve | **Prohibidos**: parser lanza `ArgumentException` (`DslParser.cs#L128-L130`) y `TemplateValidator` emite `UnsupportedInIntegratedFormat` (`TemplateValidator.cs#L139-L151`) |
-| Placeholders residuales | Se marcan como `{{UNRESOLVED:path}}` + warning (`Evaluator.cs#L150-L160`) | Prohibidos: `UnresolvedPlaceholder` en `text.value` e `image.source` (`TemplateValidator.cs#L184-L223`) |
-| Etapa Evaluate | Se ejecuta | Se salta: el AST se envuelve tal cual en `EvaluatedDocument` (`DocumentEngine.cs#L189-L195`) |
-| Id/Version en el resultado intermedio | Se pierden (ver [01 §8](./01_nucleo-pipeline.md)) | Se preservan (`DocumentEngine.cs#L190-L195`) |
-| Productor típico | App con template estático + datos dinámicos | Backend que ya resolvió el documento completo |
+| `align` | `left` (default), `center`, `right` | `LayoutEngine` lo copia a `LayoutInfo.Alignment` y el renderer lo aplica |
+| `bold` | `true` / `false` | Se propaga a `LayoutInfo.DeviceMetadata`; en ESC/POS emite `ESC ! 8` |
 
-### 2.3 Ejemplo mínimo REAL — classic
+`StyleDefinition.Attributes` es un diccionario abierto: atributos adicionales se parsean y quedan
+disponibles, pero solo `align` y `bold` tienen efecto en las implementaciones actuales.
 
-Procedencia: `src/MotorDsl.Tests/DocumentEngineTests.cs#L38-L47` (test BT-066, ejecutado contra el pipeline real):
+---
 
-```json
-{
-    "id": "test-001",
-    "version": "1.0",
-    "root": {
-        "type": "text",
-        "text": "Hola Motor DSL"
-    }
-}
+## 5. Operadores en `conditional`
+
+Comparación: `==`, `!=`, `>`, `<`, `>=`, `<=`. Lógicos: `&&`, `||`. Los literales de texto van
+entre comillas simples (`status == 'activo'`) y el parser de expresiones respeta las comillas al
+buscar operadores, de modo que un operador dentro de un literal no rompe el split.
+
+```text
+status == 'activo'
+cantidad > 50
+tipo == 'premium' && saldo >= 1000
 ```
 
-Variante con binding y contenedor (`src/MotorDsl.Tests/DocumentEngineTests.cs#L91-L105`): children `{ "type": "text", "text": "Cliente: {{nombre}}" }` con `data = new { nombre = "María", total = "1500" }`.
+Implementación: `Evaluator.EvaluateCondition` (`src/MotorDsl.Core/Evaluators/Evaluator.cs`). No es
+un intérprete de expresiones general: no soporta paréntesis, funciones ni aritmética.
 
-### 2.4 Ejemplo mínimo REAL — integrated
+---
 
-Procedencia: `src/MotorDsl.Tests/IntegratedFormatEngineTests.cs#L40-L54`:
+## 6. Los dos formatos de documento
 
-```json
-{
-    "id": "acta-001",
-    "version": "1.0",
-    "format": "integrated",
-    "root": {
-        "type": "container",
-        "layout": "vertical",
-        "children": [
-            { "type": "text", "value": "MUNICIPALIDAD DE EJEMPLO" },
-            { "type": "text", "value": "ACTA N° 2026-00123" }
-        ]
-    }
-}
+| Aspecto | `template` (clásico) | `integrated` |
+|---|---|---|
+| Campo `format` | ausente o `"template"` | `"integrated"` |
+| Texto | `{ "type":"text", "text":"Hola {{nombre}}" }` | `{ "type":"text", "value":"Hola Juan" }` |
+| `loop` / `conditional` | permitidos | **prohibidos** (ya expandidos/resueltos) |
+| Datos | diccionario requerido | no se usa |
+| Llamada al motor | `engine.Render(json, data, profile)` | `engine.Render(json, profile)` |
+| Pipeline | Parse → Validate → **Evaluate** → Layout → Render | Parse → Validate → Layout → Render |
+
+> El cambio de campo `text` → `value` en modo integrado lo hace el propio parser
+> (`DslParser.ParseTextNode`, rama `isIntegrated`). Un documento integrado que use `text` en vez
+> de `value` parsea sin error pero deja el nodo **vacío**.
+
+Validaciones exclusivas del modo integrado (`TemplateValidator`): un `loop` o `conditional`
+presente es `UnsupportedInIntegratedFormat`; un `{{…}}` sin resolver en `value` o en
+`image.source` es `UnresolvedPlaceholder`. Ambas con severidad `Error`.
+
+Cuándo usar cada uno (fuente: `formato-dsl-templates.md` §9.6): clásico para documentos
+parametrizables y plantillas reutilizables con lógica; integrado para documentos armados por un
+backend, snapshots inmutables de auditoría/reimpresión y AST serializado entre servicios.
+
+---
+
+## 7. Clases del AST (`src/MotorDsl.Core/Models/`)
+
+```text
+DocumentTemplate            Id · Version · Root · Format · Metadata
+└── DocumentNode (abstracta) Type · Children · Properties · Style
+    ├── TextNode             Text · BindPath
+    ├── ContainerNode        Layout
+    ├── LoopNode             Source · ItemAlias · Body
+    ├── ConditionalNode      Expression · TrueBranch · FalseBranch
+    ├── TableNode            Headers · Rows
+    └── ImageNode            Source · Width · Height · ImageType · Role
 ```
 
-Se renderiza con `engine.Render(json, profile)` y el test `Render_IntegratedJson_DoesNotCallEvaluator` (`IntegratedFormatEngineTests.cs#L64-L82`) verifica que el Evaluator no se invoca.
+`DocumentTemplate` expone los discriminadores como constantes: `FormatTemplate = "template"` y
+`FormatIntegrated = "integrated"`. `DocumentNode` incluye un diccionario `Properties` abierto que
+permite extender un nodo sin modificar la clase.
 
-## 3. Sintaxis de expresiones y paths (Evaluator/DataResolver)
+### Modelos de resultado
 
-| Elemento | Sintaxis | Soporte | Fuente |
-|---|---|---|---|
-| Placeholder | `{{path}}` dentro de `text` (y de `image.source`) | Regex `\{\{([^}]+)\}\}`; no resuelto → `{{UNRESOLVED:path}}` + warning (en imagen se conserva el placeholder) | `src/MotorDsl.Core/Evaluators/Evaluator.cs#L150-L160`, `#L170-L186` |
-| Path de datos | `campo`, `a.b.c`, `items[0]`, `a.items[2].x` | Diccionarios (`IDictionary<string,object>`/`object?`) primero, luego reflexión sobre propiedades públicas; índice sobre `IList`/`IEnumerable` | `src/MotorDsl.Core/Models/DataResolver.cs#L19-L150` |
-| Condición | `status == 'activo' && cantidad > 50` | Operadores: `==, !=, >=, <=, >, <, &&, \|\|`; literales string (`'x'`/`"x"`), numéricos, `true`/`false`; `===`/`!==` rechazados; sin paréntesis de agrupación (no aparece soporte en `EvaluateExpression`) | `Evaluator.cs#L88-L106`, `#L290-L338`, `#L399-L424` |
-| Alias de loop | `itemAlias` inyectado en un `ExpandoObject` que copia las claves del contexto padre | El body ve `{{item.x}}` y también el contexto raíz | `Evaluator.cs#L210-L256` |
-
-## 4. Modelos intermedios del pipeline
-
-| Modelo | Rol en el pipeline | Miembros clave | Fuente |
-|---|---|---|---|
-| `EvaluatedDocument` | Salida del Evaluator (o wrapper directo en integrated) | `Id`, `Version`, `Root` (AST resuelto, puede ser null), `Warnings`, `Errors`, `EvaluatedAt`, `IsSuccessful` | `src/MotorDsl.Core/Models/EvaluatedDocument.cs#L12-L49` |
-| `LayoutedDocument` | Salida del LayoutEngine; entrada de todo `IRenderer` | `Root`, `NodeLayoutInfo` (dict `node_N` → `LayoutInfo`), `TotalWidth`, `TotalHeight`, `DeviceProfile`, `LayoutMetadata`, `Warnings` | `src/MotorDsl.Core/Models/LayoutedDocument.cs#L7-L16` |
-| `LayoutInfo` | Layout calculado por nodo | `LineNumber`, `ColumnNumber`, `Width`, `Height`, `Alignment` (default `"left"`), `IsWrapped`, `WrappedText`, `IsTruncated`, `DeviceMetadata` | `src/MotorDsl.Core/Models/LayoutInfo.cs#L7-L18` |
-| `RasterizedImage` | Salida de `IBitmapRasterizer`: bits listos para `GS v 0` | `Bits` (byte[]), `WidthBytes`, `HeightDots` | `src/MotorDsl.Core/Models/RasterizedImage.cs#L8-L20` |
-
-Los renderers **no recorren el AST**: iteran `NodeLayoutInfo` ordenado por `LineNumber`/`ColumnNumber` y usan `WrappedText` + `DeviceMetadata` (ver [03](./03_renderizado-base.md)).
-
-### 4.1 Claves de `LayoutInfo.DeviceMetadata` producidas por `LayoutEngine`
-
-| Clave | Cuándo se setea | Consumidor | Fuente |
-|---|---|---|---|
-| `bold` = true | `style.bold == "true"` en el nodo (texto o header de tabla) | `EscPosRenderer` (ESC ! 8) | `src/MotorDsl.Core/Layout/LayoutEngine.cs#L58-L64`, `#L195-L214` |
-| `is_qr`, `qr_data` | `imageType == "qrcode"` y el perfil no niega `supports_qrcode` | `EscPosRenderer` (GS ( k) | `LayoutEngine.cs#L117-L130` |
-| `is_barcode`, `barcode_data` | `imageType == "barcode"` y el perfil no niega `supports_barcode` | `EscPosRenderer` (GS k 2) | `LayoutEngine.cs#L131-L144` |
-| `is_bitmap`, `bitmap_source`, `bitmap_width`, `image_role` | `source` empieza con `data:image/` y el perfil no niega `supports_images` | `EscPosRenderer` (GS v 0 / recall NV) | `LayoutEngine.cs#L145-L169` |
-
-Degradaciones (capability en `false`): QR → texto plano del source; barcode/bitmap → placeholder `[BARCODE: ...]`/`[IMG-DEGRADED: ...]`, todas con warning en `LayoutedDocument.Warnings` (`LayoutEngine.cs#L119-L153`).
-
-## 5. `DeviceProfile`
-
-`src/MotorDsl.Core/Models/DeviceProfile.cs#L3-L31`. Inmutable en su núcleo (`Name`, `Width` en caracteres, `RenderTarget` — solo getters, vía constructor) + capabilities dinámicas `SetCapability/GetCapability/HasCapability` + propiedades opcionales `CodePage`, `CodePageCommand`, `BaudRate`, `SupportedBarcodes` (backward compatible, `#L8-L12`).
-
-Capabilities conocidas usadas dentro de los 4 proyectos indexados:
-
-| Capability (string key) | Consumidor | Efecto | Fuente |
-|---|---|---|---|
-| `supports_qrcode`, `supports_barcode`, `supports_images` | `LayoutEngine` | `false` explícito → degradación a texto + warning; ausente = soportado | `LayoutEngine.cs#L117-L182` |
-| `codepage` (`"437"`/`"850"`) | `EscPosRenderer` | Encoding para datos de QR y barcode (no para texto, que va fijo en CP437) | `src/MotorDsl.Rendering/EscPosRenderer.cs#L136-L145` |
-| `bitmap_max_width_px` (default 384) | `EscPosRenderer` | Ancho máximo pasado al rasterizador | `EscPosRenderer.cs#L204` |
-| `nv_logo_keycode`, `nv_logo_kind` (`"fs"`/`"gsl"`) | `EscPosRenderer` | Si hay keycode y la imagen tiene `role="logo"` → recall NV en lugar de bitmap inline | `EscPosRenderer.cs#L76-L80`, `#L232-L243` |
-
-Las propiedades `CodePage`, `CodePageCommand`, `BaudRate`, `SupportedBarcodes` **no son consumidas** por Core/Parser/Rendering/Extensions (uso esperado en transportes fuera de alcance — «No verificado»).
-
-Ejemplo real de perfil en tests: `new DeviceProfile("thermal-58mm", 32, "text")` (`src/MotorDsl.Tests/DocumentEngineTests.cs#L31`).
-
-## 6. Modelos de resultado y error
-
-### 6.1 `RenderResult`
-
-`src/MotorDsl.Core/Models/RenderResult.cs#L10-L95`: `Target`, `Output` (tipado por renderer: `string` para text, `byte[]` para escpos), `Warnings`, `Errors`, `IsSuccessful` (= sin errores), helpers `AddWarning/AddError`, `ToHexString()` y `ToBase64()` (solo si `Output is byte[]`, si no `null`).
-
-### 6.2 `PrintError` y compañía
-
-- `PrintErrorType`: `Connection | Timeout | Hardware | Protocol | Unknown` (`src/MotorDsl.Core/Models/PrintError.cs#L7-L14`).
-- `PrintError` (inmutable): `Type`, `Message`, `InnerException`, `Attempt`, `MaxAttempts`; factory `FromException` clasifica: `PrinterHardwareException`→Hardware, `IOException`/`SocketException`→Connection, `TimeoutException`/`TaskCanceledException`→Timeout, resto→Unknown (`PrintError.cs#L20-L54`).
-- `PrintRetryOptions`: `MaxRetries=3`, `InitialDelayMs=500` (`PrintError.cs#L60-L64`).
-- `PrinterHardwareException`: fallo inequívoco por status (fin de papel, tapa abierta); el handler por defecto no reintenta (`src/MotorDsl.Core/Models/PrinterHardwareException.cs#L3-L12`).
-
-### 6.3 `ValidationResult`
-
-`src/MotorDsl.Core/Models/ValidationResult.cs`:
-
-- `ValidationSeverity`: `Error` (corta pipeline) | `Warning` (continúa) (`#L7-L14`).
-- `ValidationErrorType` (8 valores): `MissingField`, `TypeMismatch`, `InvalidStructure`, `InvalidSyntax`, `MissingRequiredField`, `UnknownNodeType`, `UnsupportedInIntegratedFormat`, `UnresolvedPlaceholder` (`#L20-L45`).
-- `ValidationError`: `Field`, `Type`, `Message`, `NodeType` + `Severity` (init, default `Error`) y `Location` (init, path del nodo) (`#L52-L72`).
-- `ValidationResult`: `IsValid` = no hay errores con `Severity == Error` (los warnings no invalidan); `Errors` es la lista completa incluidas advertencias (`#L79-L88`).
-
-## 7. Observaciones (trazables)
-
-| Observación | Fuente |
+| Clase | Contenido |
 |---|---|
-| El Evaluator recrea `TextNode`/`ImageNode`/`ContainerNode` sin copiar `Style` → en formato classic, `align`/`bold` definidos en el DSL se pierden antes del layout; en integrated (sin Evaluate) sí sobreviven | `src/MotorDsl.Core/Evaluators/Evaluator.cs#L162`, `#L185`, `#L277` |
-| `TextNode.BindPath` se parsea y propaga pero ningún componente lo usa para resolver texto (solo se interpolan `{{...}}` de `Text`) | `TextNode.cs#L17-L23`; `Evaluator.cs#L142-L163` |
-| `LoopNode.Body` no es hijo (`Children`): el `LayoutEngine` itera `loopNode.Children` — un LoopNode sin evaluar no layout-ea su body (en la práctica no ocurre: classic los expande, integrated los prohíbe) | `LayoutEngine.cs#L92-L102`; `LoopNode.cs#L28` |
-| `LayoutInfo.IsTruncated` se declara pero nunca se setea a `true` en `LayoutEngine` (las celdas de tabla truncan sin marcarlo) | `LayoutInfo.cs#L16`; `LayoutEngine.cs#L275-L286` |
+| `EvaluatedDocument` | `Id`, `Version`, `Root` (puede ser null), `Warnings`, `Errors`, `EvaluatedAt`, `IsSuccessful` |
+| `LayoutedDocument` | `Root`, `NodeLayoutInfo` (mapa nodo → `LayoutInfo`), `TotalWidth`, `TotalHeight`, `DeviceProfile`, `LayoutMetadata`, `Warnings` |
+| `LayoutInfo` | `LineNumber`, `ColumnNumber`, `Width`, `Height`, `Alignment`, `IsWrapped`, `WrappedText`, `IsTruncated`, `DeviceMetadata` |
+| `RenderResult` | `Target`, `Output` (`object?`), `Warnings`, `Errors`, `IsSuccessful`, helpers `ToHexString()` y `ToBase64()` |
+| `ValidationResult` / `ValidationError` | `IsValid` (sin errores de severidad `Error`), lista de errores con `Field`, `Type`, `Message`, `NodeType`, `Severity`, `Location` |
+| `RasterizedImage` | `Bits`, `WidthBytes`, `HeightDots` — salida de `IBitmapRasterizer` |
+
+`RenderResult.Output` es `object?` porque el tipo depende del renderer: `string` para `text`,
+`byte[]` para `escpos` / `escpos-bitmap` / `pdf` / `raster-preview`.
+
+---
+
+## 8. `DeviceProfile` — el perfil de salida
+
+Es el parámetro que decide **cómo** se calcula el layout y **qué** renderer se usa.
+
+| Miembro | Tipo | Rol |
+|---|---|---|
+| `Name` | string (solo lectura) | Nombre del perfil; clave en `IDeviceProfileProvider` |
+| `Width` | int (solo lectura) | **Ancho en caracteres**, no en píxeles ni mm |
+| `RenderTarget` | string (solo lectura) | Selecciona el `IRenderer` (`text`, `escpos`, `escpos-bitmap`, `pdf`, `raster-preview`) |
+| `CodePage` / `CodePageCommand` | `int?` / `byte[]?` | Página de códigos para acentos y ñ |
+| `BaudRate` | `int?` | Informativo |
+| `SupportedBarcodes` | `List<string>?` | Simbologías admitidas |
+| Capacidades | `SetCapability` / `GetCapability` / `HasCapability` | Diccionario abierto: `supports_qrcode`, `supports_barcode`, `supports_images`, `nv_logo_keycode`, `nv_logo_kind`, … |
+
+Anchos típicos: **32 caracteres** para papel de 58 mm, **48** para 80 mm
+(fuente: `docs/10_developer_guide/formato-perfiles-impresora.md`, §«Tabla de anchos típicos»).
+
+Perfiles habituales en los samples:
+
+```csharp
+new DeviceProfile("thermal_58mm", 32, "escpos-bitmap")
+new DeviceProfile("preview",      32, "raster-preview")
+new DeviceProfile("a4-pdf",       80, "pdf")
+```
+
+> **No confundir `DeviceProfile` con `PrinterProfile`.** `DeviceProfile` (en `MotorDsl.Core`)
+> describe la **salida del documento**: ancho y renderer. `PrinterProfile` (en
+> `MotorDsl.Printing.Abstractions`) describe el **temporizado del envío físico**: delays por
+> línea, por byte, tras la inicialización, tras un QR o una imagen. Ver
+> [04_impresion-transports](04_impresion-transports.md).
+
+Solo el `false` **explícito** de una capacidad degrada un nodo; una capacidad ausente no degrada
+(§6 de [01_nucleo-pipeline](01_nucleo-pipeline.md)).
+
+---
+
+## 9. Plantillas de ejemplo
+
+`docs/10_developer_guide/ejemplos-templates/` contiene 5 documentos JSON listos para usar:
+`ticket-simple.json`, `ticket-con-qr.json`, `ticket-con-barcode.json`,
+`factura-simplificada.json`, `acta-infraccion.json`.
+
+Ejemplos comentados paso a paso en `docs/11_examples/` (`ejemplo-01-simple.md`,
+`ejemplo-02-multa.md`, `ejemplo-03-multa-integrada.md`, `ejemplo-03-multaapp-nuget.md`), con logos
+de prueba en `docs/11_examples/imagenes_logos/` (`.bmp` y `.base64`).
+
+---
+
+## 10. Fuentes
+
+| Tema | Archivo |
+|---|---|
+| Gramática completa del DSL, ejemplos y errores comunes | `docs/10_developer_guide/formato-dsl-templates.md` |
+| Perfiles, anchos, codepage, cómo medir el ancho real | `docs/10_developer_guide/formato-perfiles-impresora.md` |
+| Perfiles de impresoras reales probadas | `docs/10_developer_guide/perfiles-impresoras-reales.md` |
+| Clases del AST y de resultado | `src/MotorDsl.Core/Models/*.cs` |
+| Parseo por tipo de nodo | `src/MotorDsl.Parser/DslParser.cs` |
+| Modelo conceptual y reglas | `docs/02_especificacion_funcional/modelo-datos/`, `docs/05_arquitectura_tecnica/modelo-datos-logico_v1.0.md` |
+| Conceptos y vocabulario | `docs/10_developer_guide/conceptos-fundamentales.md` |
