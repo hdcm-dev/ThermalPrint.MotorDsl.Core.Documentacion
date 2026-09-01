@@ -1,190 +1,192 @@
-# 05 — MAUI: controles y renderers
+# 05 — Capa MAUI: controles, renderers gráficos y diagnóstico
 
-> **Propósito**: lo que aporta el paquete `MotorDsl.Maui` — controles de UI listos para usar,
-> tres renderers adicionales, los rasterizadores y el proveedor de diagnóstico.
-> **Fuentes primarias**: `src/MotorDsl.Maui/` (`Controls/`, `Renderers/`, `Diagnostics/`,
-> `Printing/`, `MotorDslMauiServiceCollectionExtensions.cs`),
-> `docs/10_developer_guide/{componentes-ux-maui,render-pixelado-y-pdf,guia-integracion-maui,diagnostics}.md`.
-> El contrato `IRenderer` y los renderers base están en [03_renderizado-base](03_renderizado-base.md);
-> el servicio de impresión en [04_impresion-transports](04_impresion-transports.md).
+> **Propósito**: documentar `MotorDsl.Maui`, el paquete que aporta lo que necesita plataforma —
+> los controles de UI, los tres renderers gráficos, el rasterizado y el reporte de diagnóstico.
+> **Fuentes primarias**: `src/MotorDsl.Maui/` (`Controls/`, `Renderers/`, `Printing/`,
+> `Diagnostics/`, `MotorDslMauiServiceCollectionExtensions.cs`),
+> `docs/10_developer_guide/componentes-ux-maui.md`,
+> `docs/10_developer_guide/render-pixelado-y-pdf.md`,
+> `docs/10_developer_guide/diagnostics.md`.
+>
+> Los renderers **portables** (`text`, `escpos`) están en [03](03_renderizado-base.md); el
+> servicio de impresión que consumen los controles, en [04](04_impresion-transports.md).
 
 ---
 
-## 1. Registro: qué hace `AddMotorDslMaui()`
+## 1. Qué registra `AddMotorDslMaui()`
 
-```csharp
-builder.Services.AddMotorDslEngine()
-    .AddTemplates(...).AddProfiles(...)
-    .AddMotorDslMaui();
-```
+Se encadena sobre el `MotorDslBuilder` que devolvió `AddMotorDslEngine()`:
 
-En una sola llamada (`MotorDslMauiServiceCollectionExtensions.cs`):
-
-| Acción | Servicio |
+| Registro | Efecto |
 |---|---|
-| `AddSingleton` | `IBitmapRasterizer` → `SkiaSharpRasterizer` |
-| `AddSingleton` | `QrCodeRasterizer` |
-| `AddMotorDslPrinting()` | `IPrintErrorHandler` (default) e `IThermalPrinterService` |
-| `Replace` | `IPrintErrorHandler` → `MauiPrintErrorHandler` (reemplaza al default) |
-| `TryAddSingleton` | `IDiagnosticsReportProvider` → `MauiDiagnosticsReportProvider` |
-| `AddRenderer<T>` | `PdfRenderer`, `BitmapEscPosRenderer`, `RasterPreviewRenderer` |
+| `IBitmapRasterizer` → `SkiaSharpRasterizer` | Habilita las imágenes reales en `escpos` y `escpos-bitmap` |
+| `QrCodeRasterizer` | QR dibujables para PDF y vista previa |
+| `AddMotorDslPrinting()` | `IPrintErrorHandler` y `IThermalPrinterService` (con `TryAdd`) |
+| `Replace(IPrintErrorHandler → MauiPrintErrorHandler)` | **Reemplaza** el handler por defecto |
+| `TryAddSingleton<IDiagnosticsReportProvider, MauiDiagnosticsReportProvider>` | Diagnóstico |
+| `AddRenderer<PdfRenderer>()` | target `pdf` |
+| `AddRenderer<BitmapEscPosRenderer>()` | target `escpos-bitmap` |
+| `AddRenderer<RasterPreviewRenderer>()` | target `raster-preview` |
 
-> El uso de `TryAddSingleton` para el provider de diagnóstico es intencional: si la app registra
-> el suyo **antes**, el suyo prevalece. En cambio el error handler se registra con `Replace`, así
-> que la versión MAUI **siempre** gana sobre el default.
+Nótese el `Replace` frente al `TryAdd` del resto: el handler de MAUI **sustituye** al
+`DefaultPrintErrorHandler` que acaba de registrar `AddMotorDslPrinting()`, mientras que los
+demás respetan un registro previo del consumidor.
 
-TFMs del paquete: `net10.0-android;net10.0-ios`. Dependencias externas:
-`SkiaSharp.Views.Maui.Controls` 3.119.2, `PdfSharpCore` 1.3.67, `QRCoder` 1.8.0.
+TFM `net10.0-android;net10.0-ios`. Dependencias externas: `SkiaSharp.Views.Maui.Controls`
+3.119.2, `PdfSharpCore` 1.3.67 y `QRCoder` 1.8.0.
 
 ---
 
-## 2. Controles (`MotorDsl.Maui.Controls`)
+## 2. Los cinco controles
 
-| Control | Tipo base | Propiedades enlazables | Eventos |
-|---|---|---|---|
-| `PrinterStatusBadge` | `ContentView` | `Service` | — |
-| `PrinterPickerView` | `ContentView` | `Service`, `FilterKind`, `AutoConnectIfSingle` (default `true`) | `DeviceSelected`, `ScanError` |
-| `PrinterPickerPage` | `ContentPage` | envuelve `PrinterPickerView` | — |
-| `MauiRasterPreview` | `ContentView` | `ImageBytes` (`byte[]`), `ZoomFactor` (default `2.0`) | — |
-| `MauiDocumentPreview` | `ContentView` | `Document` (`LayoutedDocument`) | — |
-| `MauiDiagnosticsView` | `ContentView` | `Report` (`DiagnosticsReport`) | — |
+Todos son `ContentView` (salvo uno) con propiedades bindables, usables desde XAML con
+`xmlns:muic="clr-namespace:MotorDsl.Maui.Controls;assembly=MotorDsl.Maui"`.
 
-- **`PrinterStatusBadge`**: muestra el estado del `IThermalPrinterService` con color y texto; se
-  actualiza solo al cambiar `ConnectionState`, `CurrentDevice` o `LastError` (el servicio implementa
-  `INotifyPropertyChanged`).
-- **`PrinterPickerView`**: descubre dispositivos y conecta al seleccionar uno. Con
-  `AutoConnectIfSingle` activo y un único dispositivo descubierto, conecta automáticamente.
-  `FilterKind="bluetooth"` restringe el barrido a ese transport.
-- **`PrinterPickerPage`**: página modal con botón Cancelar; se cierra al conectar o cancelar.
-- **`MauiRasterPreview`**: muestra el PNG de `RasterPreviewRenderer` con zoom configurable dentro
-  de un `ScrollView`; placeholder «(sin vista previa)» cuando no hay bytes.
-- **`MauiDocumentPreview`**: vista previa a partir del `LayoutedDocument` (salida de
-  `RenderLayout`), sin pasar por un renderer.
-- **`MauiDiagnosticsView`**: renderiza el `DiagnosticsReport` en secciones (Librería, Aplicación,
-  Dispositivo, Impresora, Permisos, Notas, fecha de captura).
-
-Uso declarativo en XAML:
+| Control | Propiedades | Para qué |
+|---|---|---|
+| `PrinterStatusBadge` | `Service` | Muestra el estado de conexión; se actualiza por el `INotifyPropertyChanged` del servicio |
+| `PrinterPickerView` | `Service`, `FilterKind`, `AutoConnectIfSingle`; métodos `ScanAsync()` y `ConnectAsync(device)` | Descubre y elige impresora. `FilterKind` acota el `Kind` (`"bluetooth"`, `"network"`) |
+| `PrinterPickerPage` | — (`ContentPage`) | El picker como página completa, para flujos modales |
+| `MauiRasterPreview` | `ImageBytes`, `ZoomFactor` | Muestra la salida del target `raster-preview` |
+| `MauiDocumentPreview` | `Document` (`LayoutedDocument`) | Vista previa a partir del documento maquetado, sin renderizar a bytes |
+| `MauiDiagnosticsView` | `Report` (`DiagnosticsReport`) | Muestra el reporte de diagnóstico en pantalla |
 
 ```xml
-xmlns:muic="clr-namespace:MotorDsl.Maui.Controls;assembly=MotorDsl.Maui"
-
 <muic:PrinterStatusBadge x:Name="StatusBadge" />
 <muic:PrinterPickerView  x:Name="DevicePicker" FilterKind="bluetooth" />
 <muic:MauiRasterPreview  x:Name="RasterPreview" ZoomFactor="2" />
 ```
 
-Los controles se enlazan al servicio desde code-behind (`StatusBadge.Service = _printer;`).
-En los samples se los oculta en iOS con `IsVisible="{OnPlatform Android=True, iOS=False}"`,
-porque el transport Bluetooth no aplica ahí.
+`Service` se asigna desde el code-behind con la instancia inyectada de
+`IThermalPrinterService`. En los samples se hace en `OnAppearing`, no en el constructor.
 
 ---
 
-## 3. Renderers MAUI
+## 3. `SkiaSharpRasterizer` — de imagen a bits ESC/POS
 
-### `BitmapEscPosRenderer` — target `escpos-bitmap`
+Implementa `IBitmapRasterizer`. Convierte una imagen (base64, con o sin prefijo
+`data:image/…;base64,`) en el `RasterizedImage` que espera el comando `GS v 0`:
 
-Extiende el camino ESC/POS con soporte real de imágenes: para las entradas con
-`is_bitmap = true` en el `DeviceMetadata` usa el `IBitmapRasterizer` y emite `GS v 0`
-(`1D 76 30 00 xL xH yL yH` + datos); para el resto delega en `EscPosRenderer`.
+1. decodifica con **`SKImage.FromEncodedData` + `SKBitmap.FromImage`**;
+2. escala al ancho pedido conservando la relación de aspecto;
+3. calcula `widthBytes = ceil(ancho / 8)` — el comando empaqueta 8 píxeles por byte;
+4. convierte cada píxel a gris con los pesos ITU (`R·299 + G·587 + B·114) / 1000`) y lo
+   binariza con umbral 128, exigiendo además `alpha > 128`;
+5. arma el arreglo de bits, con el bit más significativo a la izquierda.
 
-**Manejo de fallas por severidad** (comportamiento fijado en v1.0.13):
+**Por qué `SKImage.FromEncodedData` y no `SKBitmap.Decode(byte[])`**: en SkiaSharp 3.x el
+segundo devuelve `null` incluso para PNG válidos —reproducido con un PNG 1×1 estándar—, lo que
+en la versión 1.0.13 hacía que el ticket completo saliera en cero bytes. Es una corrección
+documentada en el `CHANGELOG.md`, no una preferencia de estilo. **No revertir.**
 
-| Situación | Resultado |
+`QrCodeRasterizer` es aparte: envuelve `QRCoder` y produce un `SKBitmap` (`Rasterize`) o su
+tamaño (`Measure`), parametrizado por tamaño de módulo y nivel de corrección de errores (M por
+defecto). Lo usan el `PdfRenderer` y el `RasterPreviewRenderer`, que necesitan **dibujar** el
+QR en vez de delegarlo a la impresora.
+
+---
+
+## 4. `BitmapEscPosRenderer` — target `escpos-bitmap`
+
+Compone sobre `EscPosRenderer` y difiere en el tratamiento de las imágenes: en vez de dejar
+que la impresora interprete comandos gráficos, rasteriza todo y lo emite como `GS v 0`. Es el
+target recomendado cuando la impresora no soporta gráficos NV
+(ver `PrintStrategySelector`, [04 §6](04_impresion-transports.md)).
+
+Toma el ancho de la capacidad `bitmap_max_width_px` del perfil (384 por defecto).
+
+### Manejo de fallas de imagen por severidad
+
+La versión 1.0.13 reemplazó una degradación silenciosa por tres desenlaces explícitos:
+
+| Situación | Desenlace |
 |---|---|
-| La imagen **no se puede rasterizar** | `Error` **preciso**, con el `source` recortado y la causa: `Image rasterization failed (source='…'): <causa>`. Aborta el ticket |
-| La imagen **decodifica pero sale en blanco** (placeholder transparente) | `Warning`; el ticket **sí** se imprime |
+| La imagen **no se puede rasterizar** | **Error** preciso que incluye el `source` recortado y la causa: `Image rasterization failed (source='…'): <causa>`. Aborta el ticket |
+| La imagen decodifica pero sale **toda en blanco** (típico de un placeholder transparente) | **Warning**: `Imagen rasterizada en blanco (posible placeholder transparente)`. El ticket **sí** se imprime |
+| Falla el renderizado en general | `BitmapEscPos rendering failed: …` |
 
-No hay degradación silenciosa: todo problema de imagen queda visible en `RenderResult.Errors` o
-`Warnings`. Antes de v1.0.13 cualquier fallo de imagen descartaba **todo** el documento con un
-`Output` de 0 bytes y el mensaje genérico `BitmapEscPos rendering failed`.
-
-### `PdfRenderer` — target `pdf`
-
-Construido sobre PdfSharpCore. Soporta texto con **word-wrap por medición real**
-(`XGraphics.MeasureString`) y **salto de página automático**, QR (vía `QrCodeRasterizer`) y
-código de barras con **fallback a texto** (EAN-13 nativo está en el roadmap). Márgenes de 40 pt,
-interlineado de 4 pt e imágenes de 150×150 pt. El estado del render (documento, página actual,
-`XGraphics`, cursor vertical) se encapsula en una clase interna con `EnsureSpace(needed)`, que
-abre página nueva y resetea el cursor cuando no alcanza el espacio.
-
-### `RasterPreviewRenderer` — target `raster-preview`
-
-Produce un **PNG** que simula lo que rasterizaría la impresora térmica: texto monoespaciado a
-1 bit, bitmaps, QR y el fallback de barcode. Convierte el bit array *packed* de `RasterizedImage`
-a `SKBitmap` blanco/negro. Sirve para vista previa fiel sin enviar nada al hardware; se muestra
-con `MauiRasterPreview`.
+El principio detrás: los problemas de imagen siempre quedan visibles en `RenderResult.Errors`
+o `Warnings`, nunca desaparecen sin dejar rastro.
 
 ---
 
-## 4. Rasterizadores
+## 5. `PdfRenderer` — target `pdf`
 
-| Clase | Contrato | Qué hace |
-|---|---|---|
-| `SkiaSharpRasterizer` | `IBitmapRasterizer` | Decodifica `data:image/png;base64,…` a raster 1-bit apto para `GS v 0` |
-| `QrCodeRasterizer` | — (clase concreta) | Genera el QR a `SKBitmap` con módulos 1-bit sin antialias; `Measure(data, moduleSize, ecc)` calcula el tamaño para el layout. Reutilizado por `PdfRenderer` y `RasterPreviewRenderer` |
+Genera un PDF con **PdfSharpCore**. Estado de renderizado en `PdfRenderState`: márgenes de 40
+puntos, interlineado de 4, paginación automática, y variantes normal y negrita de la fuente.
 
-> **Detalle de implementación con historia**: `SkiaSharpRasterizer` decodifica con
-> `SKImage.FromEncodedData` + `SKBitmap.FromImage`, **no** con `SKBitmap.Decode(byte[])`. En
-> SkiaSharp 3.x ese último devuelve `null` incluso para PNG válidos (reproducido con un PNG 1×1
-> estándar), lo que hacía fallar el rasterizado y descartar el ticket completo. Cambiarlo de
-> vuelta reintroduce el bug corregido en v1.0.13. Además, `Convert.FromBase64String` está envuelto
-> para reportar un mensaje claro cuando el `source` no es base64 válido, y se eliminaron las
-> trazas `Console.WriteLine` que volcaban parte del base64 a la salida estándar en cada render.
+`MotorDslFontResolver` resuelve las tipografías desde un recurso embebido del propio ensamblado
+—`DroidSans` es la familia por defecto— para no depender de las fuentes del sistema, que en
+Android no son las mismas que en iOS.
 
----
+Los QR se dibujan como imagen usando `QrCodeRasterizer`. **EAN-13 no tiene soporte nativo en
+PDF: cae a texto**, según consta en el roadmap del `README.md`.
 
-## 5. `MauiPrintErrorHandler`
-
-Hereda de `DefaultPrintErrorHandler`, conservando su política de retry/abort
-(ver [04_impresion-transports](04_impresion-transports.md) §3), y agrega logging vía
-`Debug.WriteLine` más eventos públicos consumibles para feedback en UI (snackbar / toast).
-**No bloquea** la UI. Se registra con `Replace`, desplazando al handler default.
+> Nota histórica útil: el renderer de PDF fue **migrado a PdfSharpCore desde QuestPDF** porque
+> `libQuestPdfSkia.so` no encontraba `libstdc++.so.6` en Android y la app crasheaba. El detalle
+> está en `samples/notas-debug-android.md`.
 
 ---
 
-## 6. `MauiDiagnosticsReportProvider`
+## 6. `RasterPreviewRenderer` — target `raster-preview`
 
-Implementa `IDiagnosticsReportProvider` capturando datos reales de la plataforma: versiones de
-las librerías `MotorDsl.*` cargadas, info de la app (nombre, versión, build, package), del
-dispositivo (fabricante, modelo, plataforma, versión de OS, idiom, tipo), de la impresora
-vinculada y del estado de los permisos Android (Bluetooth, ubicación).
+Dibuja el documento en un canvas SkiaSharp y devuelve la imagen en `byte[]`: es la vista previa
+«como saldría impreso», pensada para `MauiRasterPreview`.
 
-El reporte se puede: **ver** en pantalla con `MauiDiagnosticsView`; **imprimir** como ticket
-térmico —`ToDslJson()` devuelve un documento DSL `integrated` que se pasa a
-`IDocumentEngine.Render` con cualquier perfil, con QR de correlación—; o **compartir** por
-email / WhatsApp / portapapeles vía la Share API. El patrón completo de los tres botones está en
-`docs/10_developer_guide/diagnostics.md`.
+Ancho del canvas: la capacidad `bitmap_max_width_px` (384 por defecto). Detecta el tipo de cada
+entrada con `IsQr` / `IsBitmap` / `IsBarcode` sobre el `DeviceMetadata`, calcula la posición
+horizontal según la alineación (`AlignmentToX`), y convierte los bits de un `RasterizedImage` a
+`SKBitmap` (`ConvertRasterToBitmap`) para poder dibujarlos. La tipografía sale del recurso
+embebido (`LoadEmbeddedTypeface`).
 
----
+Un bitmap que no se puede rasterizar genera una **advertencia** con el número de línea y la
+vista previa continúa: `No se pudo rasterizar bitmap en línea N: …`.
 
-## 7. Configuración de plataforma
-
-Permisos Android requeridos por el transport Bluetooth (`Platforms/Android/AndroidManifest.xml`
-de la app consumidora):
-
-```xml
-<uses-permission android:name="android.permission.BLUETOOTH_SCAN"
-                 android:usesPermissionFlags="neverForLocation" />
-<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-```
-
-Versiones mínimas de plataforma declaradas en `MotorDsl.Maui.csproj`: Android 25.0, iOS 15.0
-(en `MotorDsl.Bluetooth.csproj`, Android 24.0). Ambos paquetes fijan
-`AndroidLdFlags = -Wl,-z,max-page-size=16384` para compatibilidad con dispositivos de página de
-16 KB. `MotorDsl.Maui` embebe `Resources/Fonts/DroidSans-Regular.ttf` como `EmbeddedResource`
-(la usa el renderer raster para el texto monoespaciado).
+Dos limitaciones declaradas en el roadmap: el escalado no usa *nearest-neighbor* real (haría
+falta `SKCanvasView`) y EAN-13 cae a texto.
 
 ---
 
-## 8. Fuentes
+## 7. `MauiPrintErrorHandler`
 
-| Tema | Archivo |
+Extiende `DefaultPrintErrorHandler` sin cambiar su política de reintentos —sigue reintentando
+`Connection`, `Timeout` y `Unknown`— y agrega lo que la UI necesita:
+
+| Miembro | Rol |
 |---|---|
-| Registro DI | `src/MotorDsl.Maui/MotorDslMauiServiceCollectionExtensions.cs` |
-| Controles | `src/MotorDsl.Maui/Controls/*.cs` |
-| Renderers | `src/MotorDsl.Maui/Renderers/*.cs` |
-| Diagnóstico | `src/MotorDsl.Maui/Diagnostics/MauiDiagnosticsReportProvider.cs` |
-| Error handler | `src/MotorDsl.Maui/Printing/MauiPrintErrorHandler.cs` |
-| Guías | `docs/10_developer_guide/{componentes-ux-maui,render-pixelado-y-pdf,guia-integracion-maui,diagnostics,soporte-imagenes-termicas}.md` |
-| Historia de los fixes de imagen | `CHANGELOG.md` (1.0.13) |
+| `LogRetries` (bool, `true`) | Escribe cada intento en `Debug.WriteLine` con intento, tipo y mensaje |
+| `RetryAttempted` (evento) | Se dispara en cada reintento, con el `PrintError` |
+| `Succeeded` (evento) | Se dispara al imprimir bien, con la cantidad total de intentos |
+
+Los dos eventos son el enganche para mostrar un *toast* o un indicador de progreso sin acoplar
+la lógica de impresión a la vista.
+
+---
+
+## 8. Diagnóstico
+
+`MauiDiagnosticsReportProvider` implementa `IDiagnosticsReportProvider` y arma un
+`DiagnosticsReport` con:
+
+| Sección | Contenido |
+|---|---|
+| `Libraries` | Versión e `InformationalVersion` de los ensamblados escaneados |
+| `App` | Nombre, versión, build y package name |
+| `Device` | Fabricante, modelo, plataforma, versión de SO, idiom |
+| `Printer` | Snapshot de la impresora actual: kind, nombre, id, estado, perfil, ancho y capacidades |
+| `Permissions` | Estado de los permisos `Bluetooth` y `LocationWhenInUse` |
+| `Failures` | Las entradas recientes de `RecentFailures` del servicio |
+| `Notes`, `CapturedAt` | Nota libre y timestamp |
+
+**Privacidad**: `Build(notes, includePii)` recibe `includePii = false` por defecto y en ese modo
+`DiagnosticsBuilder.MaskMac` enmascara la MAC del dispositivo —`AA:BB:CC**:**:**`— o, si el id
+no es una MAC, deja los primeros cuatro caracteres y agrega `...`. El armado de estos snapshots
+vive en `DiagnosticsBuilder`, dentro de `MotorDsl.Printing.Abstractions`, precisamente para que
+sea **código puro y testeable** sin dependencia de MAUI.
+
+Cuatro salidas: `ToJson`, `ToPlainText`, `ToDslJson(report, paperWidthChars)` —que convierte el
+reporte en una plantilla DSL para imprimirlo como ticket, con QR de correlación— y el control
+`MauiDiagnosticsView` para verlo en pantalla.
+
+El patrón de UI recomendado —tres botones: ver, imprimir, compartir por email/WhatsApp/portapapeles
+vía Share API— está en `docs/10_developer_guide/diagnostics.md`.

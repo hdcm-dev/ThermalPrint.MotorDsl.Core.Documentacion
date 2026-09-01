@@ -1,233 +1,215 @@
-# 01 — Núcleo y pipeline
+# 01 — Núcleo y pipeline de ejecución
 
-> **Propósito**: cómo el motor transforma una plantilla DSL en salida: las 4 etapas, los
-> contratos que las definen, el orden de las validaciones y cómo se propagan errores y warnings.
-> **Fuentes primarias**: `src/MotorDsl.Core/` (`Contracts/`, `Engine/`, `Evaluators/`, `Layout/`,
-> `Validation/`, `Providers/`, `Printing/`), `src/MotorDsl.Parser/DslParser.cs`,
-> `src/MotorDsl.Extensions/`.
-> Los modelos del AST se documentan en [02_dsl-y-modelos](02_dsl-y-modelos.md); los renderers en
-> [03_renderizado-base](03_renderizado-base.md).
-
----
-
-## 1. Las 4 etapas
-
-| # | Etapa | Contrato | Implementación | Entrada → Salida |
-|---|---|---|---|---|
-| 1 | Parse | `IDslParser` | `DslParser` (`MotorDsl.Parser`) | `string` JSON → `DocumentTemplate` (AST) |
-| 2 | Evaluate | `IEvaluator` | `Evaluator` (`Core/Evaluators/`) | `DocumentNode` + datos → `EvaluatedDocument` |
-| 3 | Layout | `ILayoutEngine` | `LayoutEngine` (`Core/Layout/`) | `EvaluatedDocument` + `DeviceProfile` → `LayoutedDocument` |
-| 4 | Render | `IRenderer` | según `DeviceProfile.RenderTarget` | `LayoutedDocument` → `RenderResult` |
-
-El orquestador es `DocumentEngine` (`src/MotorDsl.Core/Engine/DocumentEngine.cs`), que recibe por
-constructor las cuatro piezas más tres validadores **opcionales** (`IDataValidator`,
-`ITemplateValidator`, `IProfileValidator`; si son `null`, esa validación se omite).
+> **Propósito**: explicar cómo el motor convierte una plantilla en una salida — las cuatro
+> etapas del pipeline, los contratos que las sostienen, dónde se valida y cómo se arma todo
+> por inyección de dependencias.
+> **Fuentes primarias**: `src/MotorDsl.Core/` (`Contracts/`, `Engine/`, `Layout/`,
+> `Validation/`, `Providers/`, `Printing/`) y `src/MotorDsl.Extensions/`.
+>
+> Los **modelos del AST y el evaluador** se documentan en [02](02_dsl-y-modelos.md); los
+> **renderers concretos**, en [03](03_renderizado-base.md).
 
 ---
 
-## 2. Las 4 sobrecargas de `IDocumentEngine`
-
-| Firma | Cuándo se usa | Etapas ejecutadas |
-|---|---|---|
-| `Render(string templateDsl, object data, DeviceProfile profile)` | Formato clásico desde JSON crudo | Validate → Parse → Validate → Evaluate → Layout → Render |
-| `Render(DocumentTemplate template, object data, DeviceProfile profile)` | Plantilla ya parseada (reuso) | Validate → Evaluate → Layout → Render |
-| `Render(string integratedJson, DeviceProfile profile)` | Formato `integrated` (datos pre-resueltos) | Validate → Parse → **Evaluate omitido** → Layout → Render |
-| `RenderLayout(string templateDsl, object data, DeviceProfile profile)` | Vista previa en UI: devuelve el `LayoutedDocument` sin renderizar | Validate → Parse → Validate → Evaluate → Layout |
-
-> **Trampa de resolución de sobrecarga**: `Render(json, profile)` y `Render(template, data, profile)`
-> se distinguen por aridad. La sobrecarga de 2 argumentos **solo** acepta documentos con
-> `"format": "integrated"`; si recibe otro formato devuelve un `RenderResult` con error explícito
-> en lugar de renderizar (`DocumentEngine.cs`, guarda defensiva del paso 3).
-
----
-
-## 3. Orden de validaciones y política de fallo
+## 1. El pipeline
 
 ```mermaid
 flowchart TD
-    A[templateDsl] --> B{TemplateValidator}
-    B -- Error --> X[RenderResult con Errors, Output = &quot;&quot;]
-    B -- Warning --> C[Parse]
-    B -- OK --> C
-    C --> D{DataValidator}
-    D -- Error --> X
-    D -- Warning --> E
-    D -- OK --> E{ProfileValidator}
-    E -- Error --> X
-    E -- OK --> F[Evaluate → Layout → Render]
-    F --> G[RenderResult + warnings acumulados]
+    A[DSL JSON] -->|IDslParser.Parse| B[DocumentTemplate + AST]
+    B -->|IEvaluator.Evaluate| C[EvaluatedDocument]
+    C -->|ILayoutEngine.ApplyLayout| D[LayoutedDocument]
+    D -->|IRenderer.Render| E[RenderResult]
+    V1[ITemplateValidator] -.valida antes de parsear.-> B
+    V2[IDataValidator] -.valida antes de evaluar.-> C
+    V3[IProfileValidator] -.valida antes del layout.-> D
 ```
 
-Reglas observadas en `DocumentEngine`:
-
-- Un **Error** de cualquier validador **corta el pipeline**: devuelve `RenderResult` con
-  `Output = ""` y los mensajes en `Errors`. Nunca lanza excepción en las sobrecargas `Render`.
-- Un **Warning** no corta: se acumula y se agrega al `RenderResult` final, prefijado por el origen
-  (`TemplateValidation:`, `DataValidation:`).
-- Los warnings de la etapa de layout (`LayoutedDocument.Warnings`, p. ej. degradación de QR) se
-  vuelcan también al `RenderResult`.
-- Toda excepción no controlada se captura y se convierte en `Errors` (`"Parse failed: …"` /
-  `"Render failed: …"`).
-- **Excepción a la regla**: `RenderLayout` sí **lanza** `InvalidOperationException` cuando una
-  validación falla, en lugar de devolver un resultado con errores.
-
-### Los tres validadores
-
-| Validador | Qué revisa | Fuente |
-|---|---|---|
-| `TemplateValidator` | Sintaxis JSON; campos raíz `id`, `version`, `root`; valor de `format`; `type` presente y conocido en cada nodo; propiedades obligatorias por tipo; en modo `integrated`, ausencia de `loop`/`conditional` y de `{{placeholders}}` sin resolver | `Core/Validation/TemplateValidator.cs` |
-| `DataValidator` | Que cada binding `{{campo}}` de un `text` exista en los datos; que el `source` de un `loop` sea una colección; estructura de condicionales. Los alias de loop se excluyen (se validan a nivel del loop) | `Core/Validation/DataValidator.cs` |
-| `ProfileValidator` | `Name` no vacío, `Width > 0`, `RenderTarget` no vacío | `Core/Validation/ProfileValidator.cs` |
-
-Matiz de severidad en `DataValidator`: un campo **inexistente** es `Error`; un campo que **existe
-pero vale null** es `Warning` (`FieldExistsButNull`). Esa distinción es la que permite imprimir
-documentos con campos opcionales vacíos.
-
-`ValidationResult.IsValid` es `true` mientras no haya ningún error de severidad `Error`
-(los `Warning` no invalidan). Tipos de error en el enum `ValidationErrorType`: `MissingField`,
-`TypeMismatch`, `InvalidStructure`, `InvalidSyntax`, `MissingRequiredField`, `UnknownNodeType`,
-`UnsupportedInIntegratedFormat`, `UnresolvedPlaceholder`.
+| Etapa | Contrato | Entrada → salida | Responsabilidad |
+|---|---|---|---|
+| 1. Parseo | `IDslParser` | `string` → `DocumentTemplate` | Convertir el JSON en AST tipado y rechazar lo malformado |
+| 2. Evaluación | `IEvaluator` | `DocumentNode` + datos → `EvaluatedDocument` | Resolver `{{bindings}}`, expandir `loop`, decidir `conditional` |
+| 3. Layout | `ILayoutEngine` | `EvaluatedDocument` + `DeviceProfile` → `LayoutedDocument` | Ajustar al ancho del papel: *wrap*, alineación, columnas de tabla, degradación por capacidad |
+| 4. Renderizado | `IRenderer` | `LayoutedDocument` + `DeviceProfile` → `RenderResult` | Emitir la salida concreta del target |
 
 ---
 
-## 4. Etapa Parse — `DslParser`
+## 2. `DocumentEngine` — el orquestador
 
-Implementado sobre `System.Text.Json`. Requiere `id`, `version` y `root`; acepta `format`
-(`template` | `integrated`, default `template`) y `metadata` opcional. Cada nodo se despacha por
-su `type` a un parser específico (`ParseTextNode`, `ParseContainerNode`, `ParseConditionalNode`,
-`ParseLoopNode`, `ParseTableNode`, `ParseImageNode`). Ante DSL inválido lanza `ArgumentException`
-(que `DocumentEngine` captura y convierte en error del `RenderResult`).
+`src/MotorDsl.Core/Engine/DocumentEngine.cs` implementa `IDocumentEngine` y expone cuatro
+puntos de entrada:
 
-Detalle de la gramática y de cada tipo de nodo: [02_dsl-y-modelos](02_dsl-y-modelos.md).
-
----
-
-## 5. Etapa Evaluate — `Evaluator`
-
-Resuelve el AST contra el contexto de datos. Responsabilidades:
-
-| Operación | Método | Notas |
-|---|---|---|
-| Resolver variable por path | `ResolveVariable(data, path)` | Delega en `IDataResolver` |
-| Evaluar condición | `EvaluateCondition(expression, data)` | Operadores `==`, `!=`, `>`, `<`, `>=`, `<=`, `&&`, `\|\|`. Parseo propio, respetando literales entre comillas |
-| Expandir colección | `ResolveCollection(data, path)` | Devuelve enumerable vacío si el path no existe |
-| Evaluar el árbol | `Evaluate(ast, data)` | Devuelve `EvaluatedDocument` con `Warnings` y `Errors` |
-
-`DataResolver` (`Core/Models/DataResolver.cs`) es el resolvedor de paths: soporta campos simples,
-paths anidados (`cliente.nombre`) e indexación de arrays (`items[0]`). Acepta como origen
-`IDictionary<string,object>`, `IDictionary<string,object?>` y objetos POCO por reflexión. Está
-escrito de forma **AOT-safe**: convierte enumerables no genéricos con un bucle en vez de `.Cast<>()`.
-
-Un binding que no resuelve genera un **warning** de evaluación, no un fallo: la validación previa
-ya decidió si era error.
-
----
-
-## 6. Etapa Layout — `LayoutEngine`
-
-Calcula, por nodo, un `LayoutInfo` (línea, columna, ancho, alto, alineación, texto con wrap,
-truncado, `DeviceMetadata`) y lo indexa en `LayoutedDocument.NodeLayoutInfo`. Todo se dimensiona
-en **caracteres**, contra `DeviceProfile.Width`.
-
-Comportamientos relevantes:
-
-- **Texto**: word-wrap a `Width`; alineación desde `style.align`; propaga `style.bold` al
-  `DeviceMetadata` para que los renderers lo apliquen (corregido en v1.0.13 — antes solo se
-  propagaba `align`, y los textos con `"bold": true` salían sin negrita).
-- **Tablas**: calcula anchos de columna repartiendo `Width`, arma línea de encabezado, separador y
-  filas ya formateadas.
-- **Imágenes**: clasifica el nodo y deja instrucciones en `DeviceMetadata` para el renderer:
-
-  | Caso | `DeviceMetadata` | `WrappedText` |
-  |---|---|---|
-  | `imageType: "qrcode"` | `is_qr`, `qr_data` | `[QR: …]` |
-  | `imageType: "barcode"` | `is_barcode`, `barcode_data` | `[BARCODE: …]` |
-  | `source` que empieza con `data:image/` | `is_bitmap`, `bitmap_source`, `bitmap_width`, y `image_role` si el nodo declara `role` | `[BITMAP: …]` (source truncado a 20 chars) |
-  | Otro | — | `[IMG: …]` |
-
-- **Degradación por capacidad (CU-23)**: si el `DeviceProfile` declara explícitamente
-  `supports_qrcode`, `supports_barcode` o `supports_images` **en `false`**, el nodo se degrada a
-  texto y se agrega un warning a `LayoutedDocument.Warnings`. La comprobación es
-  `IsCapabilityExplicitlyFalse`: una capacidad **ausente** no degrada; solo el `false` explícito
-  lo hace.
-
----
-
-## 7. Etapa Render — selección del renderer
-
-`DocumentEngine.GetRenderer(target)` consulta `IRendererRegistry` por
-`DeviceProfile.RenderTarget`. Si no hay renderer para ese target, lanza
-`InvalidOperationException` (capturada y devuelta como error del `RenderResult`).
-
-`RendererRegistry` (`Core/Engine/RendererRegistry.cs`) es un diccionario `Target → IRenderer` con
-`Register`, `GetRenderer` y `GetAvailableTargets`. Catálogo de targets y detalle de cada renderer:
-[03_renderizado-base](03_renderizado-base.md) y [05_maui-ui-renderers](05_maui-ui-renderers.md).
-
----
-
-## 8. Contratos del núcleo
-
-Los 15 contratos de `src/MotorDsl.Core/Contracts/`:
-
-| Contrato | Responsabilidad |
+| Sobrecarga | Cuándo se usa |
 |---|---|
-| `IDocumentEngine` | Orquestador del pipeline (4 sobrecargas, §2) |
-| `IDslParser` | JSON → `DocumentTemplate` |
-| `IEvaluator` | Resolución de variables, condiciones y loops |
-| `IDataResolver` | Resolución de paths y colecciones sobre el contexto de datos |
-| `ILayoutEngine` | Cálculo de layout según `DeviceProfile` |
-| `IRenderer` | Render a un `Target` concreto |
-| `IRendererRegistry` | Registro y búsqueda de renderers por target |
-| `ITemplateValidator` | Validación de la plantilla DSL |
-| `IDataValidator` | Validación de los datos contra el AST |
-| `IProfileValidator` | Validación del `DeviceProfile` |
-| `ITemplateProvider` | Origen de plantillas (solo lectura) |
-| `IDataProvider` | Origen de datos (solo lectura) |
-| `IDeviceProfileProvider` | Origen de perfiles de dispositivo (solo lectura) |
-| `IPrintErrorHandler` | Decisión de reintentar/abortar ante error de impresión |
-| `IBitmapRasterizer` | Rasterizado de imagen a bits imprimibles |
+| `Render(string templateDsl, object data, DeviceProfile)` | Plantilla clásica: parsea, valida, evalúa contra `data`, maqueta y renderiza |
+| `Render(DocumentTemplate template, object data, DeviceProfile)` | Igual, pero con la plantilla ya parseada |
+| `Render(string integratedJson, DeviceProfile)` | Documento en formato `integrated`: **saltea la etapa de evaluación** porque el AST ya viene resuelto |
+| `RenderLayout(string templateDsl, object data, DeviceProfile)` | Devuelve el `LayoutedDocument` sin renderizar; lo usan las vistas previas |
 
-Los tres *providers* son **solo lectura por diseño**: el origen del dato (API, archivo, base) es
-responsabilidad del consumidor. Las implementaciones incluidas
-(`InMemoryTemplateProvider`, `InMemoryDataProvider`, `InMemoryDeviceProfileProvider`) son
-diccionarios en memoria con un `Add()` de registro.
+**Dos regímenes de error, deliberadamente distintos.** Las sobrecargas `Render` nunca lanzan:
+capturan la excepción y devuelven un `RenderResult` con `Output = ""` y el mensaje en
+`Errors`, para que la app pueda mostrar el problema en pantalla. `RenderLayout`, en cambio,
+lanza `InvalidOperationException` cuando una validación falla.
 
-`DefaultPrintErrorHandler` reintenta ante `Connection`, `Timeout` y `Unknown`; **no** reintenta
-ante `Hardware` ni `Protocol`. Todos sus métodos son `virtual`. Ver
-[04_impresion-transports](04_impresion-transports.md).
+**Guarda defensiva del formato integrado.** `Render(json, profile)` verifica que el
+`Format` parseado sea `integrated` y, si no lo es, devuelve un error explícito que indica usar
+la sobrecarga de tres argumentos. Evita que un `template` con `{{}}` sin resolver llegue a la
+impresora con los placeholders impresos.
+
+**Propagación de advertencias.** Los `Warnings` acumulados en las tres validaciones y en el
+layout se copian al `RenderResult` final. Una advertencia no aborta el documento; un error sí.
 
 ---
 
-## 9. Cableado por DI
+## 3. Los quince contratos de `MotorDsl.Core/Contracts`
+
+| Contrato | Miembros clave | Implementación por defecto |
+|---|---|---|
+| `IDocumentEngine` | las 4 sobrecargas de la §2 | `Engine/DocumentEngine.cs` |
+| `IDslParser` | `Parse(string) → DocumentTemplate` | `MotorDsl.Parser/DslParser.cs` |
+| `IEvaluator` | `Evaluate`, `ResolveVariable`, `EvaluateCondition`, `ResolveCollection` | `Evaluators/Evaluator.cs` |
+| `IDataResolver` | `Resolve(data, path)`, `ResolveCollection` | `Models/DataResolver.cs` |
+| `ILayoutEngine` | `ApplyLayout(EvaluatedDocument, DeviceProfile)` | `Layout/LayoutEngine.cs` |
+| `IRenderer` | `Target { get; }`, `Render(...)` | `TextRenderer`, `EscPosRenderer`, y los tres de MAUI |
+| `IRendererRegistry` | `Register`, `GetRenderer`, `GetAvailableTargets` | `Engine/RendererRegistry.cs` |
+| `IBitmapRasterizer` | `Rasterize(source, widthPixels) → RasterizedImage` | `SkiaSharpRasterizer` (en `MotorDsl.Maui`) |
+| `ITemplateValidator` | `ValidateTemplate(dslJson)` | `Validation/TemplateValidator.cs` |
+| `IDataValidator` | `Validate(ast, data)` | `Validation/DataValidator.cs` |
+| `IProfileValidator` | `ValidateProfile(profile)` | `Validation/ProfileValidator.cs` |
+| `ITemplateProvider` | `GetTemplate(id)`, `GetAvailableTemplateIds()` | `Providers/InMemoryTemplateProvider.cs` |
+| `IDataProvider` | `GetData(dataKey)` | `Providers/InMemoryDataProvider.cs` |
+| `IDeviceProfileProvider` | `GetProfile(name)`, `GetAll()` | `Providers/InMemoryDeviceProfileProvider.cs` |
+| `IPrintErrorHandler` | `HandleErrorAsync`, `OnRetryAttempt`, `OnPrintSuccess` | `Printing/DefaultPrintErrorHandler.cs` |
+
+Los tres providers `InMemory*` son diccionarios: sirven para registrar plantillas, datos y
+perfiles al arrancar la app. Un consumidor que necesite traerlos de una API implementa el
+contrato y lo registra en su lugar.
+
+---
+
+## 4. `DeviceProfile` — el perfil del dispositivo de salida
+
+`src/MotorDsl.Core/Models/DeviceProfile.cs` es el parámetro que atraviesa las etapas 3 y 4.
+
+| Miembro | Tipo | Rol |
+|---|---|---|
+| `Name` | `string` (solo lectura) | Identificador del perfil |
+| `Width` | `int` (solo lectura) | Ancho útil **en caracteres** — de esto depende el *wrap* y el ancho de columnas |
+| `RenderTarget` | `string` (solo lectura) | **Elige el renderer**: `escpos`, `escpos-bitmap`, `pdf`, `raster-preview`, `text` |
+| `CodePage` / `CodePageCommand` | `int?` / `byte[]?` | Página de códigos y el comando que la selecciona |
+| `BaudRate` | `int?` | Informativo para el transport |
+| `SupportedBarcodes` | `List<string>?` | Simbologías que el hardware acepta |
+| `SetCapability` / `GetCapability` / `HasCapability` | diccionario interno | Capacidades arbitrarias por string |
+
+Las capacidades son el mecanismo de **degradación** del layout: si el perfil declara
+explícitamente `supports_qr = false`, `supports_barcode = false` o `supports_bitmap = false`,
+el `LayoutEngine` degrada ese nodo a texto y deja una advertencia. Una capacidad **ausente** no
+se interpreta como falsa: solo degrada lo declarado explícitamente en falso
+(`IsCapabilityExplicitlyFalse`, `LayoutEngine.cs:178`).
+
+> No confundir con `PrinterProfile` (`MotorDsl.Printing.Abstractions`), que gobierna las
+> demoras del envío físico. Ver [04](04_impresion-transports.md).
+
+---
+
+## 5. `LayoutEngine`
+
+`src/MotorDsl.Core/Layout/LayoutEngine.cs` (337 líneas) recorre el AST evaluado y produce un
+`LayoutedDocument`: el mismo árbol más un diccionario `NodeLayoutInfo` con un `LayoutInfo` por
+nodo.
+
+`LayoutInfo` transporta línea y columna, ancho y alto, alineación, el texto ya envuelto
+(`WrappedText`, `IsWrapped`), si hubo truncado, y un `DeviceMetadata` libre por el que viajan
+al renderer los atributos de estilo — hoy `align` y `bold`.
+
+Trabajo concreto que hace:
+
+- **Texto**: envuelve al ancho del perfil (`WrapText`) y calcula la alineación.
+- **Tablas**: reparte el ancho entre columnas (`CalculateColumnWidths`) y formatea cada fila
+  (`FormatTableRow`).
+- **Imágenes**: según el `Role` del nodo (`qr`, `barcode`, imagen común) consulta la capacidad
+  correspondiente y, si está explícitamente negada, degrada y agrega la advertencia
+  —`"QR degradado: dispositivo no soporta QR"` y equivalentes.
+
+---
+
+## 6. Las tres validaciones
+
+| Validador | Qué mira | Momento |
+|---|---|---|
+| `TemplateValidator` | El JSON en crudo: campos raíz obligatorios, tipos de nodo válidos, formato declarado, y en `integrated` que **no** queden placeholders `{{}}` | Antes de parsear |
+| `DataValidator` | El AST contra los datos: que cada binding resuelva, distinguiendo los alias introducidos por un `loop` | Antes de evaluar |
+| `ProfileValidator` | El `DeviceProfile`: coherencia de nombre, ancho y target | Antes del layout |
+
+Los tres devuelven un `ValidationResult` con una lista de `ValidationError`, cada uno con
+`Field`, `Type` (`MissingField`, `TypeMismatch`, `InvalidStructure`, `InvalidSyntax`,
+`MissingRequiredField`, `UnknownNodeType`, `UnsupportedInIntegratedFormat`,
+`UnresolvedPlaceholder`), `Message`, `NodeType`, una `Severity` (`Error` | `Warning`) y una
+`Location` opcional. `IsValid` es verdadero mientras no haya ningún error de severidad `Error`:
+las advertencias no invalidan.
+
+Los tres son **opcionales** en el constructor de `DocumentEngine`. Si no se registran, el motor
+funciona sin validar. `AddMotorDslEngine()` los registra.
+
+---
+
+## 7. `RendererRegistry` y el fallback a texto
+
+`Engine/RendererRegistry.cs` es un diccionario `Target → IRenderer`. Registrar dos renderers
+con el mismo `Target` deja al último.
+
+`GetRenderer(target)` tiene un **fallback silencioso a `"text"`** cuando el target pedido no
+existe. Es lo que permite que un perfil apuntando a un target no registrado siga produciendo
+algo legible en lugar de fallar; el costo es que un target mal escrito no se nota como error.
+Si tampoco hay renderer `text`, devuelve `null` y `DocumentEngine` lanza
+`InvalidOperationException("No renderer found for target: …")`.
+
+---
+
+## 8. Armado por inyección de dependencias
+
+`src/MotorDsl.Extensions/` provee el punto de entrada `AddMotorDslEngine()`, que registra como
+singletons: `DslParser`, `Evaluator`, `LayoutEngine`, los tres validadores, `DocumentEngine`, y
+un `IRendererRegistry` que **prerregistra `TextRenderer` y `EscPosRenderer`** y luego suma
+todos los `IRenderer` que haya en el contenedor.
+
+Devuelve un `MotorDslBuilder` encadenable:
+
+| Método | Efecto |
+|---|---|
+| `AddTemplates(cfg)` | Arma un `InMemoryTemplateProvider` y lo registra como `ITemplateProvider` |
+| `AddProfiles(cfg)` | Arma un `InMemoryDeviceProfileProvider` y lo registra como `IDeviceProfileProvider` |
+| `AddRenderer<T>()` | Registra `T` como `IRenderer`; el registry lo recoge |
 
 ```csharp
-builder.Services.AddMotorDslEngine()      // parser, evaluator, layout, registry, 3 validadores, engine
-    .AddTemplates(t => t.Add("id", jsonDsl))
-    .AddProfiles(p => p.Add(new DeviceProfile("thermal_58mm", 32, "escpos-bitmap")))
-    .AddMotorDslMaui();                   // renderers y servicios MAUI
-builder.Services.AddBluetoothPrinterTransport();
+builder.Services.AddMotorDslEngine()
+    .AddTemplates(t => t.Add("acta-infraccion", MultaDsl.Template))
+    .AddProfiles(p =>
+    {
+        p.Add(new DeviceProfile("thermal_58mm", 32, "escpos-bitmap"));
+        p.Add(new DeviceProfile("preview",      32, "raster-preview"));
+        p.Add(new DeviceProfile("a4-pdf",       80, "pdf"));
+    })
+    .AddMotorDslMaui();          // renderers y controles MAUI — ver índice 05
 ```
 
-`AddMotorDslEngine()` (`src/MotorDsl.Extensions/MotorDslServiceCollectionExtensions.cs`) registra
-todo como **singleton** y devuelve un `MotorDslBuilder` para encadenar. El `IRendererRegistry` se
-construye con una factory que registra primero `TextRenderer` y `EscPosRenderer` y después
-**todos** los `IRenderer` resueltos del contenedor — por eso `AddRenderer<T>()` basta para sumar
-un renderer propio.
-
-Métodos del `MotorDslBuilder`: `AddTemplates`, `AddProfiles`, `AddRenderer<T>`.
+**Orden importante**: `AddRenderer<T>()` debe llamarse *antes* de resolver el
+`IRendererRegistry`, porque la factory del registry enumera los `IRenderer` una sola vez, al
+construirse el singleton.
 
 ---
 
-## 10. Fuentes
+## 9. Manejo de errores de impresión
 
-| Tema | Archivo |
-|---|---|
-| Orquestación y validaciones | `src/MotorDsl.Core/Engine/DocumentEngine.cs` |
-| Registro de renderers | `src/MotorDsl.Core/Engine/RendererRegistry.cs` |
-| Evaluación | `src/MotorDsl.Core/Evaluators/Evaluator.cs`, `src/MotorDsl.Core/Models/DataResolver.cs` |
-| Layout | `src/MotorDsl.Core/Layout/LayoutEngine.cs` |
-| Validadores | `src/MotorDsl.Core/Validation/{TemplateValidator,DataValidator,ProfileValidator}.cs` |
-| Providers | `src/MotorDsl.Core/Providers/InMemory*.cs` |
-| Parser | `src/MotorDsl.Parser/DslParser.cs` |
-| DI | `src/MotorDsl.Extensions/{MotorDslBuilder,MotorDslServiceCollectionExtensions}.cs` |
-| Doc previa | `docs/05_arquitectura_tecnica/{contratos-del-motor_v1.0,flujo-ejecucion-motor_v1.0,modelo-logico-de-ejecucion_v1.0}.md` |
+`Models/PrintError.cs` clasifica la falla en `PrintErrorType`: `Connection`, `Timeout`,
+`Hardware`, `Protocol`, `Unknown`. `PrintError.FromException` mapea `PrinterHardwareException`
+→ `Hardware`; `IOException` y `SocketException` → `Connection`; `TimeoutException` y
+`TaskCanceledException` → `Timeout`; el resto → `Unknown`.
+
+`DefaultPrintErrorHandler` (`Printing/DefaultPrintErrorHandler.cs`) decide reintentar ante
+`Connection`, `Timeout` y `Unknown`, y **no** reintentar ante `Hardware` ni `Protocol` —una
+tapa abierta o un comando rechazado no mejoran repitiendo. `OnRetryAttempt` y `OnPrintSuccess`
+son *no-op* virtuales, pensados para que la capa de UI los sobrescriba: eso hace
+`MauiPrintErrorHandler` (ver [05](05_maui-ui-renderers.md)).
+
+`PrintRetryOptions` fija los valores por defecto: `MaxRetries = 3`, `InitialDelayMs = 500`. El
+uso de todo esto en el envío real está en [04](04_impresion-transports.md).

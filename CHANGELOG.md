@@ -9,6 +9,37 @@ generados conforme al Marco de Documentación de Software.
 
 ## [Unreleased]
 
+### Cambiado
+
+- **`ia-db/` regenerada desde cero** sobre `PrintThermal_Motor_Maui` @`e688f3c` (rama `main`),
+  reemplazando la base del 2026-08-07, que reflejaba `@83677eb` (v1.0.13). Se regeneró en lugar de
+  actualizarse de forma incremental por decisión del PO. Incorpora lo que el commit indexado agrega
+  sobre el anterior: el octavo paquete `MotorDsl.Network` (transport TCP 9100, que habilita la
+  impresión en iOS), el helper público `TransportChunking`, el devcontainer para los TFM `net10.0`,
+  el reparto del `pack` entre dos runners en `cd-nuget.yml` y cuatro suites de tests nuevas.
+  También corrige el manifiesto, que aún declaraba las rutas previas
+  `/DEV/ThermalPrint.MotorDsl.Core[.Documentacion]`.
+
+  Se conserva la numeración `01_nucleo-pipeline` … `09_docs-existentes`, tomada del campo
+  `ia_db_index` de `PrintThermal_Motor_Maui-docs/docs-manifest.yaml`, para mantener la trazabilidad
+  manifiesto ↔ ia-db.
+
+  Dos divergencias entre la documentación del repositorio de código y su código quedan registradas
+  como observaciones, sin corregirse —indexar no modifica el proyecto indexado—: `samples/Readme.md`
+  afirma que los dos samples `Nuget.*` consumen la librería solo por `PackageReference`, pero
+  `MotorDsl.Nuget.Integrated.MultaApp` usa siete `ProjectReference` desde `@ebe03ef`; y coexisten
+  `soporte-imagenes-termicas.md` y `soporte_imagenes_termicas.md`, con contenido distinto y sin que
+  ninguna fuente declare cuál rige.
+
+  Verificación: 11 archivos (README + 10 índices), 0 enlaces internos rotos, todos los índices dentro
+  del presupuesto de 300–500 líneas del perfil de indexado. El conteo de tests ejecutados quedó
+  **sin verificar** (285 métodos `[Fact]`/`[Theory]`, pero cada `[Theory]` aporta varios casos; no se
+  corrió `dotnet test`).
+
+- **`PROMPTs/` reorganizada por tema**: `01-Crear-Indexado/` → `Indexado/`,
+  `02-Crear-Analisis-IOs/` → `Analisis/02-Crear-Analisis-IOs/` y `03-Extender-A-IOs/` →
+  `Features/03-Extender-A-IOs/`. Solo movimientos: el contenido de los cuatro prompts no cambia.
+
 ### Añadido
 
 - **Análisis UX/UI del flujo de impresión** (`Analisis/Analisis-UX-UI.md`): relevamiento de los flujos

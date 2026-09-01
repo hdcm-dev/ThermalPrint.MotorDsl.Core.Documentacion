@@ -1,172 +1,182 @@
-# 08 — Build, versionado y DevOps
+# 08 — Build, CI/CD y publicación
 
-> **Propósito**: cómo se compila, versiona, empaqueta y publica el proyecto; qué hace cada
-> workflow de CI/CD y cada script; y cómo correr los samples en un dispositivo.
-> **Fuentes primarias**: `PrintThermalDriver.slnx`, `src/*/*.csproj`, `.github/workflows/`,
-> `scripts/{local,mobile,nuget}/`, `docs/09_devops/`, `CHANGELOG.md`, `NuGet.config`.
+> **Propósito**: explicar cómo se compila, prueba, versiona y publica el proyecto, y por qué el
+> pipeline tiene la forma que tiene.
+> **Fuentes primarias**: `.github/workflows/` (6 archivos), `scripts/` (`local/`, `mobile/`,
+> `nuget/`), `.devcontainer/`, `PrintThermalDriver.slnx`, `NuGet.config`,
+> `docs/09_devops/`, `CHANGELOG.md`.
 
 ---
 
-## 1. Prerrequisitos
+## 1. La restricción que explica todo
 
-| Requisito | Para qué |
+`dotnet pack` de un proyecto multi-TFM **exige compilar todos sus TFM**. `MotorDsl.Bluetooth` y
+`MotorDsl.Maui` declaran `net10.0-android;net10.0-ios`, y el workload `ios` **no existe para
+Linux**: `dotnet workload install ios` responde *«Workload ID ios isn't supported on this
+platform»* y el build corta con `NETSDK1178`.
+
+De ahí se derivan tres consecuencias que aparecen en todo el pipeline:
+
+1. Los seis paquetes `net10.0` se empaquetan en el runner self-hosted Linux; los dos multi-TFM,
+   en `macos-15`. **Es una restricción estructural, no una preferencia.**
+2. El script de publicación local es un `.bat` y no se portó a `.sh`: un port a Linux solo
+   podría empaquetar 6 de 8.
+3. El devcontainer cubre únicamente los TFM `net10.0`.
+
+---
+
+## 2. Los seis workflows
+
+| Workflow | Dispara | Runner | Qué hace |
+|---|---|---|---|
+| `ci.yml` | push a `main` (ignorando `**.md` y `docs/**`) y todo pull request a `main` | self-hosted `i7infra-dev` | Restore, build y `dotnet test` de `MotorDsl.Tests`. Sube los `.trx` (7 días) y comenta el PR si falla |
+| `cd-nuget.yml` | tags `v*`, push a `main`, `workflow_dispatch` | Linux + `macos-15` | Publica los 8 paquetes. Ver §3 |
+| `cd-android.yml` | push a `main`, tags `v*`, `workflow_dispatch` | self-hosted `i7infra-dev` | APK de `SampleApp` y `MultaApp` (matriz de 2), subidos como artefacto |
+| `cd-ios-sampleapp.yml` | push, `workflow_call` | `macos-15` | Build de `MotorDsl.SampleApp` para simulador iOS |
+| `cd-ios-multaapp.yml` | push, `workflow_call` | `macos-15` | Ídem para `MotorDsl.MultaApp` |
+| `cd-ios-multaapp.nuget.yml` | push, `workflow_call` | `macos-15` | Ídem para la variante que consume NuGet |
+
+SDK fijado en todos: **`10.0.102`** (variable `DOTNET_VERSION`).
+
+Los tres workflows de iOS son largos porque además de compilar **instalan el entorno**:
+descargan Xcode desde Google Drive con `gdown`, lo descomprimen e instalan, verifican
+simuladores, purgan versiones de .NET que no se usan e instalan los workloads. Antes del build
+validan los manifests de iOS y versionan el bundle desde la versión de la app.
+
+---
+
+## 3. `cd-nuget.yml` — publicación en cuatro jobs
+
+```mermaid
+graph LR
+    V[version<br/>Linux self-hosted] --> M[pack-managed<br/>6 paquetes net10.0]
+    V --> P[pack-platform<br/>macos-15: Bluetooth + Maui]
+    M --> Pub[publish<br/>verifica 8 y sube]
+    P --> Pub
+```
+
+**`version`** — resuelve un único número para los 8:
+
+| Origen del disparo | Versión |
 |---|---|
-| .NET 10 SDK (CI usa `10.0.102`) | Todo |
-| `dotnet workload install maui` | `MotorDsl.Maui`, `MotorDsl.Bluetooth` y los samples |
-| Android SDK | Compilar y correr samples en Android |
-| JDK 17 | Build de Android en CI |
+| tag `v*` | el nombre del tag sin la `v` |
+| `workflow_dispatch` | el input `version` |
+| push a `main` | `0.0.0-preview.<run_number>` |
 
-Los 5 proyectos `net10.0` (`Core`, `Parser`, `Rendering`, `Extensions`, `Printing.Abstractions`)
-y `MotorDsl.Tests` compilan **sin** workload MAUI. `MotorDsl.Maui` y `MotorDsl.Bluetooth`
-(`net10.0-android;net10.0-ios`) no.
+Se propaga por `outputs`. Un número compartido evita `NU1605` (downgrade de dependencia) en
+apps que mezclen varios paquetes.
 
-La solución está en formato **`.slnx`** (`PrintThermalDriver.slnx`), con carpetas
-`/src`, `/samples` y `/github.workflow`.
+**`pack-managed`** (Linux self-hosted) — restore, build Release, **`dotnet test`** y `pack` de
+`Core`, `Parser`, `Rendering`, `Extensions`, `Printing.Abstractions` y `Network`, con
+`-p:PackageVersion=$VERSION`.
 
----
+**`pack-platform`** (`macos-15`) — instala los workloads `ios android maui-android` y empaqueta
+`Bluetooth` y `Maui`. macOS es la única plataforma donde conviven los tres workloads.
 
-## 2. Comandos habituales
+**`publish`** — junta los artefactos de ambos jobs y **verifica que sean exactamente 8**:
 
 ```bash
-dotnet restore
-dotnet build                                                   # solución completa
-dotnet build src/MotorDsl.Maui/MotorDsl.Maui.csproj -c Debug   # un proyecto
-dotnet test  src/MotorDsl.Tests/MotorDsl.Tests.csproj          # suite (net10.0 puro)
-
-# correr un sample en Android
-dotnet build -t:Run -f net10.0-android \
-  samples/MotorDsl.Nuget.Integrated.MultaApp/MotorDsl.Nuget.Integrated.MultaApp.csproj
+if [ "$COUNT" -ne 8 ]; then
+  echo "::error::Se esperaban 8 paquetes y hay $COUNT. No se publica un conjunto incompleto."
+  exit 1
+fi
 ```
 
----
-
-## 3. Versionado
-
-Esquema **SemVer**. Regla central: **la versión no vive en los `.csproj`** — se inyecta en
-build/pack vía `-p:PackageVersion` y `-p:MotorDslVersion`.
-
-**Versión unificada**: los 8 paquetes comparten siempre el mismo número. El script de publicación
-calcula `versión unificada = max(next(patch) de cada paquete)` consultando el *flat container* de
-nuget.org. El motivo es evitar `NU1605` (downgrade de dependencia) en apps que mezclen varios.
-
-`scripts/nuget/get-next-version.ps1` hace el auto-bump: consulta
-`https://api.nuget.org/v3-flatcontainer/<paquete>/index.json` (lectura sin API key), filtra
-versiones estables `X.Y.Z` y devuelve la siguiente **solo por stdout**; los diagnósticos van a
-stderr para no romper el `FOR /F` del `.bat` que lo invoca.
-
-`MotorDslVersion` se pasa además de `Version` y `PackageVersion` para que los `.csproj` puedan
-referenciar esa versión internamente sin parsear `Version` en MSBuild.
-
-Las versiones publicadas son **inmutables**: no se re-publica un número ya subido
-(`docs/09_devops/estrategia-versionado_v1.0.md` §8). Los tags git tienen forma `v<versión>`.
-
-Historial de cambios en `CHANGELOG.md`, formato *Keep a Changelog*; la entrada vigente es
-**1.0.13 (2026-07-13)**.
+Después empuja a nuget.org **en orden de dependencias** —`Printing.Abstractions` primero, los
+consumidores después— con `--skip-duplicate`. El push real solo ocurre si el disparo fue un tag
+`v*` o un `workflow_dispatch`: los push a `main` empaquetan y verifican, pero no publican.
 
 ---
 
-## 4. Publicación NuGet — `scripts/nuget/publish-motordsl-nuget.bat`
+## 4. Versionado
 
-Es la ruta **completa** de publicación. Secuencia:
+Esquema **SemVer** `MAJOR.MINOR.PATCH`; los builds automáticos de `main` usan
+`0.0.0-preview.<n>` y no llegan al feed.
 
-1. Resuelve la API key desde `MOTORDSL_NUGET_API_KEY` o la pide por prompt.
-2. Calcula la versión unificada de los 8 paquetes.
-3. `restore` + `build -c Release` de las 7 librerías con la versión inyectada.
-4. `restore` + `dotnet test` de `MotorDsl.Tests` — **si fallan, aborta antes de publicar**.
-5. `dotnet pack` de las 7 a `./nupkg/`.
-6. `dotnet nuget push` con `--skip-duplicate`, **en orden de dependencias**:
-   `Printing.Abstractions` → `Core` → `Parser` → `Rendering` → `Extensions` → `Bluetooth` → `Maui`.
-7. Tag git `v<versión>` y push a origin (lo que dispara `cd-nuget.yml`).
-8. Limpia el caché HTTP de NuGet.
+**La versión no vive en los `.csproj`.** Ninguno de los 8 proyectos empaquetables declara
+`<Version>`: se inyecta en build/pack con `-p:PackageVersion`, `/p:Version` y
+`-p:MotorDslVersion`. Documento completo: `docs/09_devops/estrategia-versionado_v1.0.md`.
 
-```bat
-set MOTORDSL_NUGET_API_KEY=oy2x...
-scripts\nuget\publish-motordsl-nuget.bat
-```
-
-`scripts/nuget/build-motordsl-nuget.bat` empaqueta sin publicar. Detalle completo en
-`scripts/nuget/notas.md`.
+Las versiones publicadas son **inmutables**: no se puede republicar un número ya usado. Por eso
+`tag-next-version.sh` verifica que el tag no exista antes de crearlo.
 
 ---
 
-## 5. Workflows de CI/CD
+## 5. Scripts
 
-| Workflow | Disparadores | Qué hace |
+### `scripts/nuget/`
+
+| Script | Dónde corre | Qué hace |
 |---|---|---|
-| `ci.yml` | push y PR sobre `main` | `restore` → `build -c Release` → `dotnet test` de `MotorDsl.Tests` en `ubuntu-latest`; sube resultados como artefacto y comenta el PR si falla |
-| `cd-nuget.yml` | tags `v*`, push a `main`, `workflow_dispatch` (con input `version`) | Determina versión → build → tests → pack → push a nuget.org |
-| `cd-android.yml` | push a `main`, tags `v*`, `workflow_dispatch` | Matriz de 2 apps (`SampleApp`, `MultaApp`): instala workload `maui-android`, publica el APK, lo verifica y lo sube como artefacto |
-| `cd-ios-sampleapp.yml`, `cd-ios-multaapp.yml`, `cd-ios-multaapp.nuget.yml` | push a ramas indicadas | Publicación iOS en `macos-15`, con instalación manual de Xcode (descarga desde Google Drive) y del SDK .NET |
+| `tag-next-version.sh` | **cualquier Linux, sin SDK** | Consulta nuget.org, calcula la versión unificada, verifica que el tag no exista, lo crea y lo pushea → dispara `cd-nuget.yml`. Solo necesita `curl`, `python3` y `git`. Acepta `--dry-run` o una versión explícita |
+| `publish-motordsl-nuget.bat` | **solo Windows o macOS** | Publicación completa sin pasar por CI: resuelve la API key, calcula `max(next(patch))` de los 8 paquetes, build y push |
+| `build-motordsl-nuget.bat` | solo Windows o macOS | Solo empaqueta |
+| `get-next-version.ps1` | Windows | Cálculo de la próxima versión |
 
-Variables de entorno de CI: `DOTNET_VERSION = 10.0.102`, `DOTNET_VERSION_WORKLOAD = 10.0.100`,
-`JAVA_VERSION = 17`. La API key de publicación viene del secret `NUGET_API_KEY`.
+`tag-next-version.sh` existe para cubrir exactamente el hueco que `cd-nuget.yml` no llena:
+**elegir el número de versión**. El workflow lo toma del tag.
 
-Resolución de versión en `cd-nuget.yml`: tag `v*` → el tag sin la `v`; `workflow_dispatch` → el
-input; cualquier otro push → `0.0.0-preview.<run_number>`. El `push` a nuget.org **solo** ocurre
-para tags `v*` o `workflow_dispatch`.
+### `scripts/local/` y `scripts/mobile/`
 
-> **Discrepancia resuelta**: `cd-nuget.yml` empaquetaba **solo 4** proyectos. La causa era
-> estructural y no un descuido: el job corría en Linux, y `dotnet pack` de un proyecto multi-TFM
-> exige compilar todos sus TFM, pero el workload `ios` **no existe para Linux**
-> (`Workload ID ios isn't supported on this platform`; el build corta con `NETSDK1178`). Por eso
-> `Bluetooth` y `Maui` eran imposibles ahí. `Printing.Abstractions`, en cambio, sí era un descuido:
-> es `net10.0` puro.
->
-> El workflow se reestructuró en cuatro jobs — `version`, `pack-managed` (6 paquetes `net10.0` en
-> el runner self-hosted), `pack-platform` (`Bluetooth` y `Maui` en `macos-15`) y `publish`, que
-> junta ambos artefactos, verifica que estén los 8 y hace push en orden de dependencias. La
-> publicación completa ya no depende del script local de Windows.
+Atajos `.bat` para correr los samples por ADB y publicar APK firmados. Ver
+[06 §6](06_samples.md).
 
 ---
 
-## 6. Scripts locales
+## 6. Devcontainer — desarrollar en Linux
 
-| Carpeta | Scripts | Para qué |
-|---|---|---|
-| `scripts/local/` | `run-<Sample>.bat` (5), `run-All.bat`, `update-packages.bat` | Compilar y lanzar samples en un Android conectado por ADB. Equivale a `dotnet build -t:Run -f net10.0-android` con chequeo previo de dispositivo. `update-packages.bat` actualiza los `PackageReference` de los samples NuGet a la última versión estable publicada (usa `dotnet-outdated`) |
-| `scripts/mobile/` | `publish-<Sample>-apk.bat` (5), `publish-all.bat`, `update-packages.bat` | APK firmado `Release` `arm64` para instalación manual: `clean` → `publish -c Release -p:RuntimeIdentifier=android-arm64 -p:AndroidPackageFormat=apk -p:EmbedAssembliesIntoApk=true` → copia a `out/mobile/<Sample>.apk` |
-| `scripts/nuget/` | `build-…`, `publish-…`, `get-next-version.ps1`, `notas.md` | Empaquetado y publicación (§4) |
+`.devcontainer/` permite trabajar sin instalar el SDK en la máquina anfitriona.
 
-> `EmbedAssembliesIntoApk=true` es **obligatorio** para los APK: sin eso el paquete no se instala
-> manualmente vía ADB, solo funciona con `dotnet build -t:Run`
-> (fuente: `scripts/mobile/Readme.md`).
-
-Los scripts son `.bat` / `.ps1`: están pensados para Windows.
-
----
-
-## 7. Metadatos de paquete
-
-Comunes a los 8 `.csproj`: `Authors` (Fernando Rafael Filipuzzi; `MotorDsl.Bluetooth` declara
-«UTN FRP TUP Aplicada 2025»), `PackageLicenseExpression = MIT`,
-`RepositoryUrl = https://github.com/Aplicada-Streaming/PrintThermal_Motor_Maui`,
-`PackageReadmeFile = README.md` (se incluye el README de la raíz),
-`PackageTags` con `maui;thermal;escpos;dsl;printing`.
-
-`ImplicitUsings` y `Nullable` habilitados en todos. `NuGet.config` en la raíz define las fuentes
-de restore.
-
----
-
-## 8. Flujo de desarrollo y Definition of Done
-
-Flujo (`docs/README.md`): branch `feature/*` → cambios + tests → validaciones → PR → CI en verde →
-merge a `main` → generación de versión.
-
-Se considera terminado cuando: compila, los tests pasan, la cobertura es ≥ 70 %, las validaciones
-del DSL son exitosas, la documentación está actualizada y el PR fue aprobado.
-
-`nupkg/` está en `.gitignore`.
-
----
-
-## 9. Fuentes
-
-| Tema | Archivo |
+| Aspecto | Decisión |
 |---|---|
-| Solución y proyectos | `PrintThermalDriver.slnx`, `src/*/*.csproj` |
-| Workflows | `.github/workflows/{ci,cd-nuget,cd-android,cd-ios-*}.yml` |
-| Scripts | `scripts/local/Readme.md`, `scripts/mobile/Readme.md`, `scripts/nuget/notas.md`, `scripts/nuget/get-next-version.ps1` |
-| Versionado | `docs/09_devops/estrategia-versionado_v1.0.md` |
-| Pipeline y entornos | `docs/09_devops/{pipeline-ci-cd_v1.0,entornos-deploy_v1.0,guia-publicacion-nuget_v1.0}.md` |
-| Historial | `CHANGELOG.md` |
+| Imagen base | `mcr.microsoft.com/dotnet/sdk:10.0` (GA) |
+| Por qué no la de devcontainers | `mcr.microsoft.com/devcontainers/dotnet:1-10.0` entrega hoy el SDK `10.0.100-rc.2`, y tanto el CI como el runner trabajan sobre versiones GA |
+| Usuario | `vscode` no privilegiado, creado con el UID del host para que los archivos generados no queden como root |
+| `postCreateCommand` | `dotnet restore src/MotorDsl.Tests/MotorDsl.Tests.csproj` — arrastra por `ProjectReference` los seis proyectos `net10.0` |
+| Extensiones | `ms-dotnettools.csdevkit`, `ms-dotnettools.csharp`; solución por defecto `PrintThermalDriver.slnx` |
+
+**Alcance declarado**: cubre solo los TFM `net10.0` — `Core`, `Parser`, `Rendering`,
+`Extensions`, `Printing.Abstractions`, `Network` y `Tests`. `net10.0-android` necesita JDK y
+Android SDK (~4 GB) y se valida en el runner self-hosted; `net10.0-ios` es imposible en Linux.
+
+---
+
+## 7. Solución y configuración
+
+`PrintThermalDriver.slnx` es una solución en **formato XML nuevo** (`.slnx`, no `.sln`), con
+tres carpetas: `/github.workflow/` (los 6 YAML), `/samples/` (los 5 proyectos, cuatro con
+`<Deploy Solution="Debug|*">`) y `/src/` (los 9 proyectos).
+
+`NuGet.config` en la raíz define las fuentes de paquetes. `nupkg/` recibe los `.nupkg`
+generados y está en `.gitignore`.
+
+---
+
+## 8. Correcciones recientes del pipeline
+
+Registradas en el `CHANGELOG.md` y en los mensajes de commit, útiles para no reintroducirlas:
+
+- **`cd-android.yml` fallaba desde junio** —en `v1.0.11`, `v1.0.12`, `v1.0.13` y en cada push a
+  `main`— por dos causas independientes:
+  - **`NETSDK1178`**: `-f net10.0-android` filtra el *build* pero no el *restore*, que evalúa
+    todos los TFM. Se resolvió declarando el TFM de iOS de forma condicional al SO en los cinco
+    samples. **Ese patrón vale para las apps, no para las librerías**: aplicarlo a
+    `MotorDsl.Bluetooth` o `MotorDsl.Maui` haría que empaquetar en Linux produjera en silencio
+    un `.nupkg` sin el asset de iOS. Forzar `-p:TargetFrameworks=` por línea de comandos
+    tampoco sirve: la propiedad se propaga a los proyectos referenciados y los `net10.0` fallan
+    con `NETSDK1005`.
+  - **`NU1102`**: los samples declaran `<RuntimeIdentifiers>` en plural; sin elegir uno, el
+    publish resuelve el RID del host y busca `Microsoft.NETCore.App.Runtime.Mono.linux-x64`,
+    que no tiene versión 10.x publicada. Se fija `-p:RuntimeIdentifier=android-arm64`.
+- **`cd-nuget.yml` pasó de publicar 4 paquetes a los 8**, repartiendo el `pack` entre dos
+  runners. Antes, tres de ellos dependían de un script local de Windows.
+- **`ci.yml` dejó de declarar un número fijo de tests** en el nombre del job y en el comentario
+  de PR: decía 185 cuando la suite ya corría 259.
+
+---
+
+## 9. Documentación de DevOps
+
+`docs/09_devops/` contiene los cuatro documentos formales: `estrategia-versionado_v1.0.md`,
+`guia-publicacion-nuget_v1.0.md`, `pipeline-ci-cd_v1.0.md` y `entornos-deploy_v1.0.md`. Ver
+[09](09_docs-existentes.md).

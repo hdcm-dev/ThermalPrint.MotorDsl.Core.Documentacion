@@ -1,231 +1,209 @@
-# 02 — DSL y modelos
+# 02 — El DSL y los modelos del documento
 
-> **Propósito**: la gramática del DSL JSON (tipos de nodo, bindings, estilos, condicionales), los
-> dos formatos de documento y las clases del AST que los representan en memoria.
-> **Fuentes primarias**: `docs/10_developer_guide/formato-dsl-templates.md`,
-> `docs/10_developer_guide/formato-perfiles-impresora.md`, `src/MotorDsl.Core/Models/`,
-> `src/MotorDsl.Parser/DslParser.cs`, `docs/10_developer_guide/ejemplos-templates/*.json`.
-> El recorrido del pipeline sobre estos modelos está en [01_nucleo-pipeline](01_nucleo-pipeline.md).
+> **Propósito**: describir el lenguaje JSON con el que se declara un documento, los nodos del
+> AST que produce el parser, los dos formatos soportados y cómo el evaluador resuelve
+> bindings, bucles y condiciones.
+> **Fuentes primarias**: `src/MotorDsl.Parser/DslParser.cs`,
+> `src/MotorDsl.Core/Models/`, `src/MotorDsl.Core/Evaluators/Evaluator.cs`,
+> `src/MotorDsl.Core/Validation/TemplateValidator.cs`,
+> `docs/10_developer_guide/formato-dsl-templates.md`,
+> `docs/10_developer_guide/ejemplos-templates/*.json`.
+>
+> El **pipeline que consume estos modelos** está en [01](01_nucleo-pipeline.md).
 
 ---
 
-## 1. Estructura raíz
-
-| Propiedad | Tipo | Obligatoria | Descripción |
-|---|---|---|---|
-| `id` | string | Sí | Identificador del template |
-| `version` | string | Sí | Versión del template (semántica libre) |
-| `root` | object | Sí | Nodo raíz (habitualmente un `container`) |
-| `format` | string | No | `"template"` (default) o `"integrated"` |
-| `metadata` | object | No | Información libre (autor, fecha, descripción) |
+## 1. Estructura de un documento
 
 ```json
-{ "id": "mi-template", "version": "1.0", "root": { "type": "text", "text": "Hola mundo" } }
+{
+  "id": "ticket-simple",
+  "version": "1.0",
+  "format": "template",
+  "metadata": { "descripcion": "…", "anchoRecomendado": 32 },
+  "root": { "type": "container", "layout": "vertical", "children": [ … ] }
+}
 ```
 
----
-
-## 2. Tipos de nodo
-
-| `type` | Descripción | Obligatorias | Opcionales |
-|---|---|---|---|
-| `text` | Texto estático o con binding. Hoja. | `type` | `text` (o `value` en integrado), `bindPath`, `style` |
-| `container` | Agrupa hijos con un layout | `type` | `layout`, `children`, `style` |
-| `loop` | Itera una colección y repite `body` | `type`, `source`, `itemAlias` | `body` |
-| `conditional` | Incluye contenido si la expresión es verdadera | `type`, `expression` | `trueBranch`, `falseBranch` |
-| `table` | Tabla con encabezados y filas | `type` | `headers`, `rows`, `style` |
-| `image` | Imagen, QR o código de barras | `type`, `source` | `width`, `height`, `imageType`, `role`, `style` |
-
-`type` es obligatorio en **todos** los nodos: es el discriminador que usa `DslParser` para
-instanciar la clase correcta. Un `type` desconocido es error de validación (`UnknownNodeType`).
-
-### Ejemplos por tipo
-
-```json
-{ "type": "text", "text": "Cliente: {{cliente.nombre}}", "style": { "align": "left" } }
-
-{ "type": "container", "layout": "vertical",
-  "children": [ { "type": "text", "text": "Línea 1" }, { "type": "text", "text": "Línea 2" } ] }
-
-{ "type": "loop", "source": "items", "itemAlias": "item",
-  "body": { "type": "text", "text": "{{item.descripcion}}  {{item.precio}}" } }
-
-{ "type": "conditional", "expression": "total > 1000",
-  "trueBranch": { "type": "text", "text": "Envío gratis" },
-  "falseBranch": { "type": "text", "text": "Costo de envío: $500" } }
-
-{ "type": "table", "headers": ["Producto", "Cant", "Subtotal"],
-  "rows": [["Café", "2", "$800"], ["Té", "1", "$300"]] }
-
-{ "type": "image", "source": "https://ejemplo/pago/123", "imageType": "qrcode" }
-```
-
-`imageType` distingue el tratamiento en layout y render: `"qrcode"`, `"barcode"`, o bitmap cuando
-`source` empieza con `data:image/`. El campo opcional `role` (`"logo"` | `"signature"`) enruta el
-logo por *recall* de memoria NV cuando la impresora lo soporta; las firmas siempre van inline
-(ver [04_impresion-transports](04_impresion-transports.md)).
-
----
-
-## 3. Bindings
-
-Sintaxis `{{path}}` dentro de `text`. El path admite campos simples, anidados (`cliente.nombre`)
-e indexación (`items[0].precio`). Varios bindings pueden convivir en un mismo string.
-
-Dentro de un `loop`, el `itemAlias` queda disponible como raíz del path
-(`{{item.descripcion}}`). `DataValidator` excluye los alias de loop de su chequeo de campos
-faltantes: se validan a nivel del loop, no del texto.
-
-Alternativa a `{{…}}`: la propiedad `bindPath` de un nodo `text`, que resuelve el valor
-directamente desde los datos.
-
----
-
-## 4. Estilos
-
-Objeto `style` con atributos clave-valor. Los reconocidos por el pipeline:
-
-| Atributo | Valores | Efecto |
+| Campo raíz | Obligatorio | Notas |
 |---|---|---|
-| `align` | `left` (default), `center`, `right` | `LayoutEngine` lo copia a `LayoutInfo.Alignment` y el renderer lo aplica |
-| `bold` | `true` / `false` | Se propaga a `LayoutInfo.DeviceMetadata`; en ESC/POS emite `ESC ! 8` |
+| `id` | sí | String no vacío; identifica la plantilla |
+| `version` | sí | String no vacío |
+| `root` | sí | El nodo raíz, típicamente un `container` |
+| `format` | no | `"template"` (por defecto) o `"integrated"`. Cualquier otro valor es error |
+| `metadata` | no | Objeto libre; valores string, number, bool — el resto se guarda como texto |
 
-`StyleDefinition.Attributes` es un diccionario abierto: atributos adicionales se parsean y quedan
-disponibles, pero solo `align` y `bold` tienen efecto en las implementaciones actuales.
+Cualquier incumplimiento hace que `DslParser.Parse` lance `ArgumentException`; un JSON
+sintácticamente inválido se reenvía como `ArgumentException("Invalid JSON format: …")`.
 
 ---
 
-## 5. Operadores en `conditional`
+## 2. Los seis tipos de nodo
 
-Comparación: `==`, `!=`, `>`, `<`, `>=`, `<=`. Lógicos: `&&`, `||`. Los literales de texto van
-entre comillas simples (`status == 'activo'`) y el parser de expresiones respeta las comillas al
-buscar operadores, de modo que un operador dentro de un literal no rompe el split.
+El parser acepta exactamente estos `type` y rechaza cualquier otro con
+`"Unsupported element type: …"`.
+
+| `type` | Clase del AST | Campos que lee el parser |
+|---|---|---|
+| `text` | `TextNode` | `text` (o `value` en integrado), `bindPath`, `style` |
+| `container` | `ContainerNode` | `layout`, `children[]` |
+| `conditional` | `ConditionalNode` | `expression`, `trueBranch`, `falseBranch` |
+| `loop` | `LoopNode` | `source`, `itemAlias`, `body` |
+| `table` | `TableNode` | `headers[]`, `rows[][]` |
+| `image` | `ImageNode` | `source`, `width`, `height`, `imageType`, `role` |
+
+Todos derivan de `DocumentNode` (`Models/DocumentNode.cs`), que aporta `Type`, `Children`,
+un diccionario `Properties` y un `Style` opcional (`StyleDefinition`, un diccionario de
+atributos).
+
+### Detalle por nodo
+
+- **`text`** — El contenido va en `text` en formato clásico y en `value` en integrado. `style`
+  es un objeto libre; los atributos que el motor efectivamente propaga hasta el renderer son
+  **`align`** (`left` | `center` | `right`) y **`bold`**. `bindPath` queda registrado en el
+  nodo pero la resolución de valores se hace por los `{{placeholders}}` del propio texto.
+- **`container`** — `layout` acepta cualquier string; el valor por defecto es `"vertical"`. Es
+  el nodo de agrupación y anida recursivamente.
+- **`conditional`** — Si la expresión da verdadero se emite `trueBranch`; si da falso se emite
+  `falseBranch`, y si no hay `falseBranch` **el nodo desaparece** del documento.
+- **`loop`** — Recorre la colección en `source` exponiendo cada elemento bajo el nombre
+  `itemAlias`, y emite `body` una vez por elemento. El resultado se envuelve en un
+  `ContainerNode` vertical; con cero elementos, el contenedor sale vacío.
+- **`table`** — `headers` es un array de strings y `rows` un array de arrays de strings. El
+  reparto de columnas lo hace el `LayoutEngine`.
+- **`image`** — `source` es la imagen (típicamente base64). `role` es opcional y rutea el
+  tratamiento: `qr`, `barcode`, `logo`, `signature`. `width` y `height` solo se leen si el
+  JSON los trae como número.
+
+---
+
+## 3. Los dos formatos
+
+| | `template` (clásico) | `integrated` |
+|---|---|---|
+| Campo del texto | `text` | `value` |
+| `{{placeholders}}` | sí | **prohibidos** |
+| `loop` / `conditional` | sí | **prohibidos** — el parser los rechaza |
+| Requiere `data` | sí | no |
+| Etapa de evaluación | se ejecuta | **se saltea** |
+| Sobrecarga del motor | `Render(dsl, data, profile)` | `Render(json, profile)` |
+
+El formato integrado existe para el caso en que **quien produce el documento ya resolvió los
+datos** —un backend, por ejemplo— y la app solo tiene que imprimirlo. Al no haber evaluación
+no hay bindings sin resolver ni sorpresas de contexto.
+
+Las prohibiciones se aplican en dos lugares: el parser lanza al encontrar un `loop` o
+`conditional` en integrado, y el `TemplateValidator` reporta un `UnsupportedInIntegratedFormat`
+o un `UnresolvedPlaceholder` (regex `\{\{[^}]+\}\}`) antes de parsear.
+
+---
+
+## 4. Resolución de datos
+
+`DataResolver` (`Models/DataResolver.cs`) implementa el acceso por ruta con punto:
+`cliente.direccion.ciudad`. Cada segmento se resuelve primero como clave de diccionario y, si
+no, por reflexión sobre las propiedades del objeto; un segmento con corchetes
+(`items[0]`) se trata como índice de colección. Cualquier eslabón nulo corta la cadena y
+devuelve `null`.
+
+`ResolveCollection` devuelve la ruta como `IEnumerable<object>`, aceptando tanto colecciones
+genéricas como no genéricas, y una colección vacía cuando la ruta no resuelve.
+
+---
+
+## 5. Interpolación de `{{bindings}}`
+
+El evaluador reemplaza el patrón `\{\{([^}]+)\}\}` en el `text` de cada `TextNode` y en el
+`source` de cada `ImageNode`.
+
+| Situación | Qué pasa |
+|---|---|
+| La variable resuelve | Se sustituye por `value.ToString()` |
+| No resuelve, en un `text` | Se emite el literal `{{UNRESOLVED:<ruta>}}` y se agrega la advertencia `"Unresolved variable: <ruta>"` |
+| No resuelve, en el `source` de una imagen | Se **conserva el placeholder** tal cual y se advierte `"Unresolved variable in image source: <ruta>"` |
+
+Que el texto no resuelto salga marcado en la salida en lugar de vacío es deliberado: el
+problema se ve en el ticket impreso en vez de pasar inadvertido.
+
+---
+
+## 6. Expresiones de `conditional`
+
+`Evaluator.EvaluateExpression` implementa un evaluador propio, deliberadamente chico.
+
+| Elemento | Soportado |
+|---|---|
+| Comparación | `==`, `!=`, `>`, `<`, `>=`, `<=` |
+| Lógicos | `\|\|` (menor precedencia), `&&` |
+| Operandos literales | string entre comillas simples o dobles, entero, decimal, `true`, `false` |
+| Operandos variables | cualquier ruta resoluble por `DataResolver` |
+| Paréntesis | **no** |
+| Aritmética | **no** |
 
 ```text
 status == 'activo'
 cantidad > 50
-tipo == 'premium' && saldo >= 1000
+a == 1 && b == 2
+tipo == 'A' || tipo == 'B'
 ```
 
-Implementación: `Evaluator.EvaluateCondition` (`src/MotorDsl.Core/Evaluators/Evaluator.cs`). No es
-un intérprete de expresiones general: no soporta paréntesis, funciones ni aritmética.
+Los operadores dentro de literales de string se ignoran: tanto la búsqueda del operador
+(`FindOperatorIndex`) como el corte por `&&`/`||` (`SplitExpression`) llevan la cuenta de las
+comillas abiertas. Una expresión que no encaja en ninguna forma lanza
+`ArgumentException("Cannot parse expression: …")`.
+
+La comparación usa `Equals` para `==` y `!=`, y `IComparable.CompareTo` para las de orden, con
+`ToString()` como último recurso. **No hay coerción de tipos**: comparar el string `"50"` con
+el número `50` no da verdadero.
 
 ---
 
-## 6. Los dos formatos de documento
+## 7. Contexto de datos dentro de un `loop`
 
-| Aspecto | `template` (clásico) | `integrated` |
-|---|---|---|
-| Campo `format` | ausente o `"template"` | `"integrated"` |
-| Texto | `{ "type":"text", "text":"Hola {{nombre}}" }` | `{ "type":"text", "value":"Hola Juan" }` |
-| `loop` / `conditional` | permitidos | **prohibidos** (ya expandidos/resueltos) |
-| Datos | diccionario requerido | no se usa |
-| Llamada al motor | `engine.Render(json, data, profile)` | `engine.Render(json, profile)` |
-| Pipeline | Parse → Validate → **Evaluate** → Layout → Render | Parse → Validate → Layout → Render |
+Por cada elemento, el evaluador arma un `ExpandoObject` nuevo que copia el contexto exterior y
+le agrega la clave `itemAlias`. Así, dentro del cuerpo conviven `{{item.nombre}}` y las
+variables del documento.
 
-> El cambio de campo `text` → `value` en modo integrado lo hace el propio parser
-> (`DslParser.ParseTextNode`, rama `isIntegrated`). Un documento integrado que use `text` en vez
-> de `value` parsea sin error pero deja el nodo **vacío**.
+La copia intenta primero tratar los datos como `IDictionary<string, object>` o
+`IDictionary<string, object?>`, y solo cae a reflexión sobre propiedades si no son
+diccionarios. El comentario en el código lo justifica como *dictionary-first for AOT safety*:
+la reflexión es el camino frágil bajo compilación AOT.
 
-Validaciones exclusivas del modo integrado (`TemplateValidator`): un `loop` o `conditional`
-presente es `UnsupportedInIntegratedFormat`; un `{{…}}` sin resolver en `value` o en
-`image.source` es `UnresolvedPlaceholder`. Ambas con severidad `Error`.
-
-Cuándo usar cada uno (fuente: `formato-dsl-templates.md` §9.6): clásico para documentos
-parametrizables y plantillas reutilizables con lógica; integrado para documentos armados por un
-backend, snapshots inmutables de auditoría/reimpresión y AST serializado entre servicios.
+Consecuencia práctica para el `DataValidator`: los alias de bucle **no** existen en los datos
+de entrada, así que el validador los rastrea aparte (`IsLoopAlias`) para no reportarlos como
+bindings rotos.
 
 ---
 
-## 7. Clases del AST (`src/MotorDsl.Core/Models/`)
+## 8. Modelos que atraviesan el pipeline
 
-```text
-DocumentTemplate            Id · Version · Root · Format · Metadata
-└── DocumentNode (abstracta) Type · Children · Properties · Style
-    ├── TextNode             Text · BindPath
-    ├── ContainerNode        Layout
-    ├── LoopNode             Source · ItemAlias · Body
-    ├── ConditionalNode      Expression · TrueBranch · FalseBranch
-    ├── TableNode            Headers · Rows
-    └── ImageNode            Source · Width · Height · ImageType · Role
-```
-
-`DocumentTemplate` expone los discriminadores como constantes: `FormatTemplate = "template"` y
-`FormatIntegrated = "integrated"`. `DocumentNode` incluye un diccionario `Properties` abierto que
-permite extender un nodo sin modificar la clase.
-
-### Modelos de resultado
-
-| Clase | Contenido |
+| Modelo | Qué transporta |
 |---|---|
-| `EvaluatedDocument` | `Id`, `Version`, `Root` (puede ser null), `Warnings`, `Errors`, `EvaluatedAt`, `IsSuccessful` |
-| `LayoutedDocument` | `Root`, `NodeLayoutInfo` (mapa nodo → `LayoutInfo`), `TotalWidth`, `TotalHeight`, `DeviceProfile`, `LayoutMetadata`, `Warnings` |
-| `LayoutInfo` | `LineNumber`, `ColumnNumber`, `Width`, `Height`, `Alignment`, `IsWrapped`, `WrappedText`, `IsTruncated`, `DeviceMetadata` |
-| `RenderResult` | `Target`, `Output` (`object?`), `Warnings`, `Errors`, `IsSuccessful`, helpers `ToHexString()` y `ToBase64()` |
-| `ValidationResult` / `ValidationError` | `IsValid` (sin errores de severidad `Error`), lista de errores con `Field`, `Type`, `Message`, `NodeType`, `Severity`, `Location` |
-| `RasterizedImage` | `Bits`, `WidthBytes`, `HeightDots` — salida de `IBitmapRasterizer` |
+| `DocumentTemplate` | `Id`, `Version`, `Root`, `Metadata`, `Format`. Las constantes `FormatTemplate` / `FormatIntegrated` |
+| `EvaluatedDocument` | El AST resuelto, más `Warnings`, `Errors`, `EvaluatedAt` e `IsSuccessful` |
+| `LayoutedDocument` | El AST más `NodeLayoutInfo`, `TotalWidth`/`TotalHeight`, el `DeviceProfile` usado, `LayoutMetadata` y `Warnings` |
+| `RenderResult` | `Target`, `Output` (`object?`: `string` o `byte[]`), `Warnings`, `Errors`, `IsSuccessful`, y los helpers `ToHexString()` y `ToBase64()` |
+| `RasterizedImage` | `Bits`, `WidthBytes`, `HeightDots` — el formato que espera el comando `GS v 0` |
+| `ValidationResult` | Lista de `ValidationError` con severidad; ver [01 §6](01_nucleo-pipeline.md) |
 
-`RenderResult.Output` es `object?` porque el tipo depende del renderer: `string` para `text`,
-`byte[]` para `escpos` / `escpos-bitmap` / `pdf` / `raster-preview`.
-
----
-
-## 8. `DeviceProfile` — el perfil de salida
-
-Es el parámetro que decide **cómo** se calcula el layout y **qué** renderer se usa.
-
-| Miembro | Tipo | Rol |
-|---|---|---|
-| `Name` | string (solo lectura) | Nombre del perfil; clave en `IDeviceProfileProvider` |
-| `Width` | int (solo lectura) | **Ancho en caracteres**, no en píxeles ni mm |
-| `RenderTarget` | string (solo lectura) | Selecciona el `IRenderer` (`text`, `escpos`, `escpos-bitmap`, `pdf`, `raster-preview`) |
-| `CodePage` / `CodePageCommand` | `int?` / `byte[]?` | Página de códigos para acentos y ñ |
-| `BaudRate` | `int?` | Informativo |
-| `SupportedBarcodes` | `List<string>?` | Simbologías admitidas |
-| Capacidades | `SetCapability` / `GetCapability` / `HasCapability` | Diccionario abierto: `supports_qrcode`, `supports_barcode`, `supports_images`, `nv_logo_keycode`, `nv_logo_kind`, … |
-
-Anchos típicos: **32 caracteres** para papel de 58 mm, **48** para 80 mm
-(fuente: `docs/10_developer_guide/formato-perfiles-impresora.md`, §«Tabla de anchos típicos»).
-
-Perfiles habituales en los samples:
-
-```csharp
-new DeviceProfile("thermal_58mm", 32, "escpos-bitmap")
-new DeviceProfile("preview",      32, "raster-preview")
-new DeviceProfile("a4-pdf",       80, "pdf")
-```
-
-> **No confundir `DeviceProfile` con `PrinterProfile`.** `DeviceProfile` (en `MotorDsl.Core`)
-> describe la **salida del documento**: ancho y renderer. `PrinterProfile` (en
-> `MotorDsl.Printing.Abstractions`) describe el **temporizado del envío físico**: delays por
-> línea, por byte, tras la inicialización, tras un QR o una imagen. Ver
-> [04_impresion-transports](04_impresion-transports.md).
-
-Solo el `false` **explícito** de una capacidad degrada un nodo; una capacidad ausente no degrada
-(§6 de [01_nucleo-pipeline](01_nucleo-pipeline.md)).
+`RenderResult.Output` es `object?` porque el tipo depende del target: `string` para `text`,
+`byte[]` para `escpos`, `escpos-bitmap`, `pdf` y `raster-preview`. Quien lo consume debe
+comprobar el tipo. `ToHexString()` y `ToBase64()` devuelven `null` si la salida no es `byte[]`.
 
 ---
 
 ## 9. Plantillas de ejemplo
 
-`docs/10_developer_guide/ejemplos-templates/` contiene 5 documentos JSON listos para usar:
-`ticket-simple.json`, `ticket-con-qr.json`, `ticket-con-barcode.json`,
-`factura-simplificada.json`, `acta-infraccion.json`.
+Cinco plantillas completas y comentadas viven en
+`docs/10_developer_guide/ejemplos-templates/`:
 
-Ejemplos comentados paso a paso en `docs/11_examples/` (`ejemplo-01-simple.md`,
-`ejemplo-02-multa.md`, `ejemplo-03-multa-integrada.md`, `ejemplo-03-multaapp-nuget.md`), con logos
-de prueba en `docs/11_examples/imagenes_logos/` (`.bmp` y `.base64`).
-
----
-
-## 10. Fuentes
-
-| Tema | Archivo |
+| Archivo | Qué demuestra |
 |---|---|
-| Gramática completa del DSL, ejemplos y errores comunes | `docs/10_developer_guide/formato-dsl-templates.md` |
-| Perfiles, anchos, codepage, cómo medir el ancho real | `docs/10_developer_guide/formato-perfiles-impresora.md` |
-| Perfiles de impresoras reales probadas | `docs/10_developer_guide/perfiles-impresoras-reales.md` |
-| Clases del AST y de resultado | `src/MotorDsl.Core/Models/*.cs` |
-| Parseo por tipo de nodo | `src/MotorDsl.Parser/DslParser.cs` |
-| Modelo conceptual y reglas | `docs/02_especificacion_funcional/modelo-datos/`, `docs/05_arquitectura_tecnica/modelo-datos-logico_v1.0.md` |
-| Conceptos y vocabulario | `docs/10_developer_guide/conceptos-fundamentales.md` |
+| `ticket-simple.json` | Contenedores, estilos, `loop` sobre ítems de venta |
+| `factura-simplificada.json` | Documento más largo con tabla |
+| `ticket-con-qr.json` | Nodo `image` con rol QR |
+| `ticket-con-barcode.json` | Nodo `image` con rol barcode |
+| `acta-infraccion.json` | El caso real de multa de tránsito |
+
+La especificación en prosa del formato está en
+`docs/10_developer_guide/formato-dsl-templates.md`; ver [09](09_docs-existentes.md).

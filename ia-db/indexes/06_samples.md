@@ -1,175 +1,188 @@
-# 06 — Samples e integración
+# 06 — Samples
 
-> **Propósito**: qué demuestra cada una de las 5 apps MAUI de ejemplo, cuál tomar como punto de
-> partida y cuál es el patrón canónico de integración en una app externa.
-> **Fuentes primarias**: `samples/Readme.md`, `samples/*/MauiProgram.cs`, `samples/*/Pages/`,
-> `samples/*/Templates/`, `README.md` (Quickstart), `docs/11_examples/`.
-> Cómo lanzarlos: [08_build-devops](08_build-devops.md).
+> **Propósito**: decir qué demuestra cada una de las cinco apps de ejemplo, cuál mirar como
+> referencia y cómo correrlas.
+> **Fuentes primarias**: `samples/` (los cinco `.csproj`, `MauiProgram.cs`, `Pages/`,
+> `Templates/`), `samples/Readme.md`, `samples/notas-debug-android.md`,
+> `scripts/local/Readme.md`, `scripts/mobile/Readme.md`, `docs/11_examples/`.
 
 ---
 
 ## 1. Catálogo
 
-| Sample | Qué demuestra | Modo de consumo |
+Las cinco son apps .NET MAUI. Se diferencian en **dos ejes independientes**: cómo consumen la
+librería (proyecto o paquete) y qué formato del DSL usan (`template + data` o `integrated`).
+
+| Sample | `ApplicationId` | Formato DSL | Consumo | Qué demuestra |
+|---|---|---|---|---|
+| `MotorDsl.SampleApp` | `com.motordsl.sampleapp` | template | `ProjectReference` (4) | El pipeline DSL puro: render a `text` y `escpos`, sin transport, sin PDF, sin bitmap |
+| `MotorDsl.MultaApp` | `com.motordsl.multaapp` | template | `ProjectReference` (4) | Caso completo de multa de tránsito, con renderers y servicios **locales** al sample |
+| `MotorDsl.Integrated.MultaApp` | `com.motordsl.integrated.multaapp` | integrated | `ProjectReference` (4) | El mismo caso con los datos ya resueltos en la plantilla |
+| `MotorDsl.Nuget.MultaApp` | `com.motordsl.nuget.multaapp` | template | **`PackageReference` (7), `Version="1.0.*"`** | Valida que los paquetes publicados funcionen tal como se consumen |
+| `MotorDsl.Nuget.Integrated.MultaApp` | `com.motordsl.nuget.integrated.multaapp` | integrated | `ProjectReference` (7) — ver §4 | El patrón canónico recomendado a un desarrollador externo |
+
+**Cuál mirar primero**: `MotorDsl.Nuget.Integrated.MultaApp` es el punto de partida
+recomendado en `samples/Readme.md` — combina formato integrado, controles MAUI y el registro
+completo de servicios.
+
+---
+
+## 2. Los dos ejes
+
+### Formato del DSL
+
+| | `template + data` | `integrated` |
 |---|---|---|
-| `MotorDsl.SampleApp` | Demo mínimo: render a texto y ESC/POS **sin transport** | `ProjectReference` |
-| `MotorDsl.MultaApp` | Multa de tránsito completa con servicios MAUI locales; formato **clásico** (template + datos) | `ProjectReference` |
-| `MotorDsl.Integrated.MultaApp` | Lo mismo con DSL en formato **`integrated`** (datos pre-resueltos) | `ProjectReference` |
-| `MotorDsl.Nuget.MultaApp` | Equivalente a `MultaApp` consumiendo los paquetes publicados | `PackageReference` (7 paquetes, `Version="1.0.*"`) |
-| `MotorDsl.Nuget.Integrated.MultaApp` | Equivalente al integrado, vía NuGet | `PackageReference` (7 paquetes, `Version="1.0.*"`) |
+| Samples | `SampleApp`, `MultaApp`, `Nuget.MultaApp` | `Integrated.MultaApp`, `Nuget.Integrated.MultaApp` |
+| Plantillas | con `{{placeholders}}`, `loop`, `conditional` | JSON ya resuelto |
+| Llamada al motor | `_engine.Render(template, data, profile)` | `_engine.Render(json, profile)` |
+| Pipeline | incluye la etapa Evaluator | la saltea |
 
-Los dos samples NuGet referencian los 7 paquetes **exclusivamente** por `<PackageReference>`;
-no usan `<ProjectReference>`. Sirven como prueba de que los paquetes publicados son
-autosuficientes.
+Detalle de la diferencia en [02 §3](02_dsl-y-modelos.md).
 
-**Punto de partida recomendado**: `MotorDsl.Nuget.Integrated.MultaApp` — combina formato
-integrado + consumo desde NuGet + controles MAUI, y es el más cercano al patrón que se recomienda
-a un desarrollador externo (fuente: `samples/Readme.md`).
+### Modo de consumo
 
----
-
-## 2. Anatomía de un sample
-
-```text
-samples/<Sample>/
-├── MauiProgram.cs              Cableado DI del motor, perfiles, plantillas y transport
-├── App.xaml / AppShell.xaml    Bootstrap MAUI estándar
-├── Pages/MainPage.xaml(.cs)    UI: picker de impresora, preview, botón imprimir
-├── Templates/*.cs              Plantillas DSL como constantes string en C#
-├── Controls/                   (SampleApp y MultaApp) Controles propios previos a MotorDsl.Maui
-├── Renderers/                  (MultaApp e Integrated) Copias locales de renderers
-├── Services/                   (SampleApp/MultaApp) Servicio de impresión local previo al paquete
-├── Platforms/{Android,iOS}/    Manifest, permisos, entry points
-└── Resources/Raw/motordsl-config.json   URL base del backend
-```
-
-Las plantillas viven como **constantes C#** (`MultaIntegratedDsl.Document`,
-`TicketSimpleDsl`, `ComprobanteDsl`, `TicketDsl`), no como archivos `.json` embebidos: se
-registran con `AddTemplates(t => t.Add("id", Xxx.Document))`.
-
-> Los samples con carpetas `Controls/`, `Renderers/` y `Services/` propias
-> (`MotorDsl.SampleApp`, `MotorDsl.MultaApp`, `MotorDsl.Integrated.MultaApp`) conservan copias
-> locales anteriores a que esa funcionalidad se empaquetara en `MotorDsl.Maui`. Los samples
-> `Nuget.*` ya usan solo los controles del paquete. Para copiar código, tomarlo de los `Nuget.*`.
+Los samples con `ProjectReference` a `src/MotorDsl.*` sirven para iterar sobre la librería sin
+publicar paquetes. `MotorDsl.Nuget.MultaApp` es el único que consume **exclusivamente** por
+`PackageReference` con `Version="1.0.*"`, y por eso es la prueba real de que lo publicado
+funciona.
 
 ---
 
-## 3. Patrón canónico de integración
+## 3. Dos generaciones de código
 
-### 3.1 Paquetes
-
-```xml
-<PackageReference Include="MotorDsl.Maui"      Version="<latest>" />
-<PackageReference Include="MotorDsl.Bluetooth" Version="<latest>" />
-```
-
-Los otros 5 paquetes llegan como dependencias transitivas.
-
-### 3.2 `MauiProgram.cs`
+`MotorDsl.MultaApp` y `MotorDsl.Integrated.MultaApp` son **anteriores al refactor** que extrajo
+los renderers gráficos y el servicio de impresión a `MotorDsl.Maui` y
+`MotorDsl.Printing.Abstractions`. Por eso traen copias locales en sus propias carpetas
+`Renderers/` (`BitmapEscPosRenderer`, `PdfRenderer`, `SkiaSharpRasterizer`) y `Services/`
+(`IThermalPrinterService`, `ThermalPrinterService`, `PrinterProfile`), y las registran a mano:
 
 ```csharp
 builder.Services.AddMotorDslEngine()
-    .AddTemplates(t =>
-    {
-        t.Add("acta-infraccion-integrada", MultaIntegratedDsl.Document);
-    })
+    .AddTemplates(…).AddProfiles(…)
+    .AddRenderer<PdfRenderer>()          // clases locales del sample
+    .AddRenderer<BitmapEscPosRenderer>();
+
+builder.Services.AddSingleton<IBitmapRasterizer, SkiaSharpRasterizer>();
+builder.Services.AddSingleton<IPrintErrorHandler, DefaultPrintErrorHandler>();
+builder.Services.AddSingleton<IThermalPrinterService, ThermalPrinterService>();
+```
+
+Los dos samples `Nuget.*` usan la forma actual, que reemplaza todo eso por una llamada:
+
+```csharp
+builder.Services.AddMotorDslEngine()
+    .AddTemplates(t => t.Add("acta-infraccion-integrada", MultaIntegratedDsl.Document))
     .AddProfiles(p =>
     {
         p.Add(new DeviceProfile("thermal_58mm", 32, "escpos-bitmap"));
         p.Add(new DeviceProfile("preview",      32, "raster-preview"));
         p.Add(new DeviceProfile("a4-pdf",       80, "pdf"));
+        p.Add(new DeviceProfile("pdf",          48, "pdf"));
     })
     .AddMotorDslMaui();
 
 builder.Services.AddBluetoothPrinterTransport();
-builder.Services.AddTransient<MainPage>();
 ```
 
-Un perfil por **modo de salida**: impresión térmica, vista previa y PDF comparten el mismo
-documento y solo cambian de `RenderTarget`.
+**Al buscar el patrón vigente, mirar los `Nuget.*`.** Los otros dos son válidos como referencia
+histórica, y `samples/Readme.md` lo advierte explícitamente.
 
-### 3.3 UI
+Ninguno de los cinco registra todavía `AddNetworkPrinterTransport()`: el transport de red es
+posterior y su ejemplo de uso está en el `README.md` de la raíz, no en un sample.
+
+---
+
+## 4. Observación — divergencia con `samples/Readme.md`
+
+`samples/Readme.md` afirma que **los dos** samples `Nuget.*` referencian los paquetes
+«exclusivamente por `<PackageReference>`… No usan `<ProjectReference>`».
+
+Verificado sobre los `.csproj` en el commit `e688f3c`, eso vale para
+`MotorDsl.Nuget.MultaApp`, pero **no** para `MotorDsl.Nuget.Integrated.MultaApp`, que declara
+siete `<ProjectReference>` a `src/MotorDsl.*` (líneas 91-97 de su `.csproj`) y ningún
+`PackageReference` a MotorDsl. El cambio entró en el commit `ebe03ef`
+(*feat(printing): logo NV con recall…*), presumiblemente para poder iterar sobre la librería
+sin publicar.
+
+**Hecho**: el `.csproj` usa `ProjectReference`. **Interpretación**: la documentación quedó
+desactualizada respecto del código. No se corrigió nada: indexar no modifica el proyecto.
+
+---
+
+## 5. Estructura típica de un sample
+
+```text
+samples/<Nombre>/
+├── MauiProgram.cs              Registro de servicios: motor, plantillas, perfiles, transport
+├── App.xaml / AppShell.xaml    Andamiaje MAUI
+├── Pages/MainPage.xaml(.cs)    UI: picker, badge, vista previa, botones
+├── Templates/*.cs              Las plantillas DSL como constantes string
+├── Platforms/Android/          AndroidManifest.xml con los permisos, MainActivity
+├── Platforms/iOS/              Info.plist, Entitlements, AppDelegate
+└── Resources/Raw/motordsl-config.json
+```
+
+Las plantillas viven como constantes `string` en clases de `Templates/` (`MultaDsl`,
+`TicketSimpleDsl`, `ComprobanteDsl`, y sus variantes `*IntegratedDsl`), no como archivos
+sueltos: así se registran directo con `AddTemplates`.
+
+Los tres samples que muestran vista previa traen además `Controls/MauiDocumentPreview.cs`
+local, por la misma razón histórica de la §3.
+
+### TFM condicional
+
+Los cinco `.csproj` declaran:
 
 ```xml
-xmlns:muic="clr-namespace:MotorDsl.Maui.Controls;assembly=MotorDsl.Maui"
-
-<muic:PrinterStatusBadge x:Name="StatusBadge"
-                         IsVisible="{OnPlatform Android=True, iOS=False}" />
-<muic:PrinterPickerView  x:Name="DevicePicker" FilterKind="bluetooth"
-                         IsVisible="{OnPlatform Android=True, iOS=False}" />
-<muic:MauiRasterPreview  x:Name="RasterPreview" ZoomFactor="2" />
+<TargetFrameworks>net10.0-android</TargetFrameworks>
+<TargetFrameworks Condition="…IsOSPlatform('windows') or …IsOSPlatform('osx')">$(TargetFrameworks);net10.0-ios</TargetFrameworks>
 ```
 
-Los controles Bluetooth se ocultan en iOS porque el transport Classic SPP no aplica ahí.
+El TFM de iOS se agrega **solo si el SO puede compilarlo**. La razón: `-f net10.0-android`
+filtra el *build* pero no el *restore*, que evalúa todos los TFM igual y en Linux muere con
+`NETSDK1178` porque el workload `ios` no existe ahí.
 
-### 3.4 Code-behind
+**Este patrón vale para las apps, no para las librerías.** Aplicarlo a `MotorDsl.Bluetooth` o
+`MotorDsl.Maui` haría que empaquetar en Linux produjera **en silencio** un `.nupkg` sin el
+asset de iOS. Ver [08](08_build-devops.md).
 
-```csharp
-public MainPage(IDocumentEngine engine, IThermalPrinterService printer)
-{
-    InitializeComponent();
-    _engine = engine;
-    _printer = printer;
-    StatusBadge.Service  = _printer;   // enlace manual al servicio
-    DevicePicker.Service = _printer;
-}
+---
 
-private async void OnImprimir(object? sender, EventArgs e)
-{
-    var profile = new DeviceProfile("thermal_58mm", 32, "escpos-bitmap");
-    var result  = _engine.Render(json, profile);          // sobrecarga integrada
-    if (result.IsSuccessful && _printer.IsConnected)
-        await _printer.SendBytesAsync((byte[])result.Output!);
-}
+## 6. Cómo correrlos
+
+```bash
+dotnet build -t:Run -f net10.0-android samples/<Nombre>/<Nombre>.csproj
 ```
 
-Puntos a respetar: chequear `result.IsSuccessful` **antes** de enviar; el `Output` es `object?` y
-requiere cast al tipo del target; `SendBytesAsync` ya trae retry propio, no envolverlo en otro
-bucle de reintentos.
+Atajos en `scripts/local/` (Windows, `.bat`, requieren dispositivo por ADB):
 
-### 3.5 Permisos Android
-
-`BLUETOOTH_SCAN` (con `usesPermissionFlags="neverForLocation"`), `BLUETOOTH_CONNECT` y
-`ACCESS_FINE_LOCATION` en `Platforms/Android/AndroidManifest.xml`.
-
----
-
-## 4. Configuración de backend
-
-Cada sample de multa incluye `Resources/Raw/motordsl-config.json` con `backendBaseUrl`, la URL
-base del backend externo del que la app toma los datos de la infracción. El valor versionado
-apunta a una IP concreta y el script de publicación de la app host lo reescribe antes de compilar
-el APK. **No es parte del motor**: es configuración de la app de ejemplo.
-
----
-
-## 5. Ejemplos documentados
-
-`docs/11_examples/` explica los casos paso a paso:
-
-| Documento | Contenido |
+| Script | Efecto |
 |---|---|
-| `ejemplo-01-simple.md` | Ticket mínimo de punta a punta |
-| `ejemplo-02-multa.md` | Acta de infracción con formato clásico |
-| `ejemplo-03-multa-integrada.md` | La misma acta en formato integrado |
-| `ejemplo-03-multaapp-nuget.md` | La misma app consumiendo los paquetes NuGet |
-| `imagenes_logos/` | Logos de prueba en `.bmp` y `.base64` (municipios) |
+| `run-MotorDsl.<Nombre>.bat` | Compila y lanza ese sample |
+| `run-All.bat` | Los cinco en cadena; corre `update-packages.bat` antes |
+| `update-packages.bat` | Actualiza las `PackageReference` de los samples Nuget a la última estable publicada, vía `dotnet-outdated` |
 
-Plantillas JSON listas para usar en `docs/10_developer_guide/ejemplos-templates/`
-(ver [02_dsl-y-modelos](02_dsl-y-modelos.md) §9).
-
-Notas de depuración en Android: `samples/notas-debug-android.md`.
+`scripts/mobile/publish-MotorDsl.<Nombre>-apk.bat` empaqueta el APK firmado; `publish-all.bat`
+hace los cinco. El workflow `cd-android.yml` publica APK solo de `SampleApp` y `MultaApp`; ver
+[08](08_build-devops.md).
 
 ---
 
-## 6. Fuentes
+## 7. Debugging en Android
 
-| Tema | Archivo |
-|---|---|
-| Catálogo y snippets | `samples/Readme.md` |
-| Cableado por sample | `samples/*/MauiProgram.cs` |
-| Plantillas de ejemplo | `samples/*/Templates/*.cs` |
-| Quickstart oficial | `README.md` (raíz del repositorio) |
-| Guía de integración | `docs/10_developer_guide/guia-integracion-maui.md` |
-| Ejemplos narrados | `docs/11_examples/*.md` |
-| Depuración Android | `samples/notas-debug-android.md` |
+`samples/notas-debug-android.md` reúne comandos `adb`, inspección de paquetes instalados y el
+troubleshooting recurrente: Skia, `libstdc++` y las páginas de 16 KB.
+
+Incluye, como referencia histórica, el crash de `libQuestPdfSkia.so` —`libstdc++.so.6` no
+encontrada— que motivó migrar el renderer de PDF a **PdfSharpCore**. Ver
+[05 §5](05_maui-ui-renderers.md).
+
+---
+
+## 8. Documentación narrada de los ejemplos
+
+`docs/11_examples/` explica los casos paso a paso: `ejemplo-01-simple.md`,
+`ejemplo-02-multa.md`, `ejemplo-03-multa-integrada.md` y `ejemplo-03-multaapp-nuget.md`. La
+carpeta `imagenes_logos/` guarda los logotipos usados en los ejemplos, en `.bmp` y en
+`.base64` listo para pegar en un nodo `image`. Ver [09](09_docs-existentes.md).

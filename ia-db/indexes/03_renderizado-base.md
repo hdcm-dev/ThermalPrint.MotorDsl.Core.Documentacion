@@ -1,142 +1,139 @@
 # 03 — Renderizado base y extensibilidad
 
-> **Propósito**: los renderers que viven en `MotorDsl.Rendering` (`text` y `escpos`), el catálogo
-> de comandos ESC/POS, cómo se registran los renderers y cómo agregar uno propio.
-> **Fuentes primarias**: `src/MotorDsl.Rendering/{TextRenderer,EscPosRenderer,EscPosCommands}.cs`,
-> `src/MotorDsl.Core/Engine/RendererRegistry.cs`, `src/MotorDsl.Extensions/`,
+> **Propósito**: documentar los renderers portables (`text` y `escpos`), la tabla de comandos
+> ESC/POS que emiten, y cómo se agrega un renderer propio.
+> **Fuentes primarias**: `src/MotorDsl.Rendering/` (`TextRenderer.cs`, `EscPosRenderer.cs`,
+> `EscPosCommands.cs`), `src/MotorDsl.Extensions/`,
 > `docs/05_arquitectura_tecnica/extensibilidad-motor_v1.1.md`.
-> Los renderers de `MotorDsl.Maui` (`pdf`, `escpos-bitmap`, `raster-preview`) están en
-> [05_maui-ui-renderers](05_maui-ui-renderers.md).
+>
+> Los renderers **gráficos** (`escpos-bitmap`, `pdf`, `raster-preview`) viven en
+> `MotorDsl.Maui` y se documentan en [05](05_maui-ui-renderers.md). El contrato `IRenderer` y
+> el registry están en [01](01_nucleo-pipeline.md).
 
 ---
 
-## 1. El contrato `IRenderer`
+## 1. Los cinco targets
 
-```csharp
-public interface IRenderer
-{
-    string Target { get; }                                        // "escpos", "pdf", "text", …
-    RenderResult Render(LayoutedDocument document, DeviceProfile profile);
-}
-```
+| `Target` | Renderer | Paquete | Tipo de `Output` |
+|---|---|---|---|
+| `text` | `TextRenderer` | `MotorDsl.Rendering` | `string` |
+| `escpos` | `EscPosRenderer` | `MotorDsl.Rendering` | `byte[]` |
+| `escpos-bitmap` | `BitmapEscPosRenderer` | `MotorDsl.Maui` | `byte[]` |
+| `pdf` | `PdfRenderer` | `MotorDsl.Maui` | `byte[]` |
+| `raster-preview` | `RasterPreviewRenderer` | `MotorDsl.Maui` | `byte[]` |
 
-Un renderer recibe el documento **ya maquetado** (líneas, alineación, wrap y `DeviceMetadata`
-resueltos por `LayoutEngine`) y solo traduce a su formato de salida. No parsea, no evalúa
-bindings, no conoce los datos originales ni el transport.
+Los dos primeros se **prerregistran** en `AddMotorDslEngine()`; los tres de MAUI los agrega
+`AddMotorDslMaui()`.
 
-`Target` es el discriminador: `DeviceProfile.RenderTarget` decide qué renderer se invoca.
+Un `DeviceProfile` apuntando a un target no registrado **no falla**: el registry cae a `text`.
+Ver [01 §7](01_nucleo-pipeline.md).
 
 ---
 
-## 2. Catálogo de targets
+## 2. Lo que ambos renderers tienen en común
 
-| `Target` | Renderer | Paquete | `Output` | Registro |
-|---|---|---|---|---|
-| `text` | `TextRenderer` | Rendering | `string` | siempre (`AddMotorDslEngine`) |
-| `escpos` | `EscPosRenderer` | Rendering | `byte[]` | siempre (`AddMotorDslEngine`) |
-| `escpos-bitmap` | `BitmapEscPosRenderer` | Maui | `byte[]` | `AddMotorDslMaui()` |
-| `pdf` | `PdfRenderer` | Maui | `byte[]` | `AddMotorDslMaui()` |
-| `raster-preview` | `RasterPreviewRenderer` | Maui | `byte[]` (PNG) | `AddMotorDslMaui()` |
+Los dos recorren `LayoutedDocument.NodeLayoutInfo` —no el árbol— filtrando las entradas con
+`WrappedText` no vacío y ordenando por `LineNumber` y luego `ColumnNumber`. El layout ya
+resolvió el envolvido y la alineación; el renderer solo traduce a su formato de salida.
+
+Los dos capturan toda excepción y devuelven un `RenderResult` con el error en `Errors` y una
+salida vacía (`""` o `byte[0]`), en vez de propagar.
 
 ---
 
 ## 3. `TextRenderer` — target `text`
 
-Salida `string` legible, pensada para depuración y para comparar en tests. Recorre
-`NodeLayoutInfo` ordenado por `LineNumber` y luego `ColumnNumber`, descartando entradas sin
-`WrappedText`, y aplica alineación **por relleno de espacios** a `profile.Width`:
+El más simple: por cada entrada aplica la alineación sobre el ancho del perfil
+(`ApplyAlignment` → `LeftAlignText` / `CenterText` / `RightAlignText`, con soporte de saltos
+internos) y agrega la línea al `StringBuilder`.
 
-- `left`: `PadRight(width)`; si el texto excede, **trunca** desde el inicio.
-- `right`: `PadLeft(width)`; si excede, conserva los últimos `width` caracteres.
-- `center`: reparte el padding, con el sobrante a la derecha.
-
-Ante excepción devuelve `RenderResult` con error y `Output = ""` (no lanza).
+Su valor es doble: es la salida de depuración legible del pipeline, y es el **fallback** del
+registry cuando un target no existe.
 
 ---
 
 ## 4. `EscPosRenderer` — target `escpos`
 
-Emite `byte[]` con comandos ESC/POS **sin dependencias externas** (no usa ESCPOS_NET ni similar).
-Acepta opcionalmente un `IBitmapRasterizer` por constructor; si no lo recibe, las imágenes
-bitmap caen a un placeholder textual.
+Emite el flujo de bytes que entiende una impresora térmica ESC/POS.
 
-### Secuencia de salida
+### Estructura del flujo
 
-1. `ESC @` — inicializar impresora.
-2. `ESC t 0` — seleccionar codepage PC437.
-3. Por cada entrada de `NodeLayoutInfo` con texto, ordenada por línea y columna, se despacha
-   **en este orden de prioridad**:
+```text
+ESC @            (init)
+ESC t 0          (codepage PC437)
+  … por cada entrada del layout …
+GS V 0           (corte total)
+```
 
-   | Condición en `DeviceMetadata` | Emisión |
-   |---|---|
-   | `is_qr` | secuencia `GS ( k`: tamaño de módulo 3, corrección M, *store data*, *print* |
-   | `is_barcode` | `GS k 2` (EAN-13, modo 2) + datos + terminador `NUL` |
-   | `is_bitmap` y `image_role == "logo"` y el perfil tiene `nv_logo_keycode` | *recall* del logo desde memoria NV (pocos bytes, sin rasterizar) |
-   | `is_bitmap` (resto, incluidas las firmas) | rasterizado inline → `GS v 0` |
-   | texto | comando de alineación → `ESC ! 8` si `bold` → texto codificado → `ESC ! 0` si venía bold → `LF` |
+### Ruteo por entrada
 
-4. `GS V 0` — corte total de papel.
+El renderer decide qué emitir mirando banderas que el `LayoutEngine` dejó en
+`LayoutInfo.DeviceMetadata`:
 
-### Codificación de caracteres
+| Bandera en `DeviceMetadata` | Emite |
+|---|---|
+| `is_qr` = true | Secuencia `GS ( k` con `qr_data` |
+| `is_barcode` = true | Secuencia `GS k 2` (EAN-13) con `barcode_data`, terminada en NUL |
+| `is_bitmap` = true | Recall de logo NV **o** imagen inline `GS v 0`, según §5 |
+| ninguna | Comando de alineación + `ESC ! 8` si `bold` + texto en CP437 + `LF` |
 
-El texto se codifica en **CP437** vía `CodePagesEncodingProvider` (fallback a ASCII), que ubica
-los caracteres españoles en las posiciones correctas. Para QR y códigos de barras, el encoding se
-toma de la capacidad `codepage` del perfil (`"437"`, `"850"`; si no hay, ASCII).
+El texto se codifica en **CP437** (`CodePagesEncodingProvider`), el codepage IBM original en
+el que los caracteres del español caen en las posiciones correctas; si no está disponible, cae
+a ASCII. Para QR y barcode el codepage se toma de la capacidad `codepage` del perfil (`437`,
+`850`, o ASCII por defecto).
 
-### Ruteo del logo NV
+### Ruteo de imágenes (§5)
 
-El renderer **no conoce el transport ni las capacidades reales de la impresora**: solo lee del
-`DeviceProfile` lo que la app haya seteado (`nv_logo_keycode`, `nv_logo_kind`). Si
-`nv_logo_kind == "fs"` emite `FS p` (NV bit image clásica por número); en cualquier otro caso
-emite `GS ( L` función 69 (*recall* por keycode, escala 1×1). Aprovisionar ese logo es
-responsabilidad del transport — ver [04_impresion-transports](04_impresion-transports.md).
+Una imagen con `role == "logo"` **y** un perfil que declare la capacidad `nv_logo_keycode` se
+emite como *recall* del logo grabado en la memoria no volátil de la impresora: unos pocos
+bytes en lugar del bitmap completo. La familia de comando la elige la capacidad
+`nv_logo_kind`: `"fs"` usa `FS p` (NV bit image por número) y cualquier otro valor usa
+`GS ( L` (recall por keycode).
 
-Ante excepción devuelve error y `Output = Array.Empty<byte>()`.
+Las firmas (`role == "signature"`) y todo el resto van **siempre inline** por `GS v 0`.
+
+El renderer **no conoce el transport ni sus capacidades**: solo lee del `DeviceProfile` lo que
+la app dejó ahí. Es lo que mantiene a `MotorDsl.Rendering` en `net10.0` puro, sin dependencia
+de la capa de impresión.
+
+Para el inline, `EmitBitmap` recorta el prefijo `data:image/…;base64,` si lo hay, toma el
+ancho máximo de la capacidad `bitmap_max_width_px` (384 por defecto), delega en el
+`IBitmapRasterizer` y construye el `GS v 0` centrado. **Si no hay rasterizador registrado o la
+rasterización falla, emite el literal `[BITMAP]` seguido de un salto de línea** — el ticket
+sale, con el hueco visible.
 
 ---
 
-## 5. `EscPosCommands` — catálogo de comandos
+## 5. Tabla de comandos — `EscPosCommands`
 
-`src/MotorDsl.Rendering/EscPosCommands.cs` centraliza los bytes crudos:
+`src/MotorDsl.Rendering/EscPosCommands.cs` centraliza los bytes. Es estática y pública: un
+renderer externo puede reutilizarla.
 
-| Constante / método | Bytes | Significado |
+| Miembro | Bytes | Significado |
 |---|---|---|
-| `Init` | `1B 40` | `ESC @` — inicializar |
+| `Init` | `1B 40` | `ESC @` — reinicia la impresora |
 | `AlignLeft` / `AlignCenter` / `AlignRight` | `1B 61 00/01/02` | `ESC a n` |
-| `StyleBold` / `StyleNormal` | `1B 21 08` / `1B 21 00` | `ESC ! n` |
+| `StyleNormal` / `StyleBold` | `1B 21 00` / `1B 21 08` | `ESC ! n` |
 | `CutFull` / `CutPartial` | `1D 56 00` / `1D 56 01` | `GS V n` |
-| `LineFeed` | `0A` | `LF` |
-| `FeedLines(n)` | `1B 64 n` | `ESC d n` |
+| `LineFeed` | `0A` | salto de línea |
+| `FeedLines(n)` | `1B 64 n` | `ESC d n` — avanza n líneas |
 | `BarcodeEan13` | `1D 6B 02` | `GS k 2` |
-| `QrSetSize3`, `QrSetErrorM`, `QrStoreData`, `QrPrint` | `1D 28 6B …` | `GS ( k` |
-| `BuildRasterImageGsV0(bits, widthBytes, heightDots)` | `1D 76 30 00 xL xH yL yH` + bits | `GS v 0` — imagen raster |
-| `RecallNvGraphicsGsL(keycode)` | `1D 28 4C 06 00 30 45 kc1 kc2 01 01` | `GS ( L` fn 69 — recall NV |
-| `RecallNvBitImageFsP(n, mode)` | `1C 70 n m` | `FS p` — recall NV clásico |
+| `QrSetSize3` / `QrSetErrorM` / `QrStoreData` / `QrPrint` | `1D 28 6B …` | `GS ( k` — tamaño de módulo 3, corrección M, carga e impresión |
+| `BuildRasterImageGsV0(bits, widthBytes, heightDots)` | `1D 76 30 00 xL xH yL yH …` | `GS v 0` — imagen raster |
+| `RecallNvGraphicsGsL(keycode)` | `1D 28 4C …` | `GS ( L` — recall de logo NV por keycode |
+| `RecallNvBitImageFsP(n, mode)` | `1C 70 n mode` | `FS p` — recall de NV bit image por número |
 
-`BuildRasterImageGsV0` es el **formato común** entre la imagen inline y el aprovisionamiento del
-logo en NV: el mismo `byte[]` sirve para ambos caminos.
-
----
-
-## 6. Registro y resolución
-
-`RendererRegistry` (`src/MotorDsl.Core/Engine/RendererRegistry.cs`) es un diccionario
-`Target → IRenderer` con `Register(IRenderer)`, `GetRenderer(target)` y `GetAvailableTargets()`.
-
-`AddMotorDslEngine()` lo construye con una factory que:
-
-1. registra `TextRenderer` y `EscPosRenderer`;
-2. resuelve **todos** los `IRenderer` del contenedor (`sp.GetServices<IRenderer>()`) y los registra.
-
-Consecuencia práctica: registrar un `IRenderer` en DI —directamente o vía `AddRenderer<T>()`—
-alcanza para que quede disponible. Registrar uno con un `Target` ya existente lo **sobrescribe**.
-
-Si `DeviceProfile.RenderTarget` no tiene renderer, `DocumentEngine` produce un `RenderResult` con
-el error `"No renderer found for target: <target>"`.
+Los comandos de **definición** y borrado de logos NV no están acá: viven en el transport
+Bluetooth, porque requieren diálogo con el dispositivo. Ver [04](04_impresion-transports.md).
 
 ---
 
-## 7. Cómo agregar un renderer propio
+## 6. Agregar un renderer propio
+
+1. Implementar `IRenderer`: un `Target` único y el método `Render(LayoutedDocument, DeviceProfile)`.
+2. Registrarlo con `AddRenderer<T>()` sobre el `MotorDslBuilder`, **antes** de que se resuelva
+   el `IRendererRegistry`.
+3. Crear un `DeviceProfile` cuyo `RenderTarget` sea ese string.
 
 ```csharp
 public class CsvRenderer : IRenderer
@@ -145,8 +142,8 @@ public class CsvRenderer : IRenderer
 
     public RenderResult Render(LayoutedDocument document, DeviceProfile profile)
     {
-        var result = new RenderResult("csv");
-        // recorrer document.NodeLayoutInfo ordenado por LineNumber / ColumnNumber
+        var result = new RenderResult(Target);
+        // recorrer document.NodeLayoutInfo ordenado por LineNumber
         result.Output = /* string o byte[] */;
         return result;
     }
@@ -157,27 +154,9 @@ builder.Services.AddMotorDslEngine()
     .AddProfiles(p => p.Add(new DeviceProfile("export-csv", 80, "csv")));
 ```
 
-Convenciones a respetar (observadas en los renderers existentes):
+Un renderer nuevo **no requiere tocar** `DocumentEngine`, `LayoutEngine` ni el parser: la
+resolución es por string en el registry. Ese es el sentido de la decisión D2 del
+[índice maestro](00_MASTER-INDEX.md).
 
-- Ordenar por `LineNumber` y luego `ColumnNumber`; ignorar entradas sin `WrappedText`.
-- Consultar `DeviceMetadata` antes que el texto: `is_qr`, `is_barcode`, `is_bitmap` indican que la
-  entrada **no** es texto plano.
-- Capturar toda excepción y devolverla como `Errors` del `RenderResult` con un `Output` vacío
-  coherente con el tipo, en lugar de propagar.
-- No asumir que existe un `IBitmapRasterizer`: hacerlo opcional y degradar con un warning.
-
-Guía extendida: `docs/05_arquitectura_tecnica/extensibilidad-motor_v1.1.md`
-(`_v1.0.md` es la versión histórica).
-
----
-
-## 8. Fuentes
-
-| Tema | Archivo |
-|---|---|
-| Renderer de texto | `src/MotorDsl.Rendering/TextRenderer.cs` |
-| Renderer ESC/POS | `src/MotorDsl.Rendering/EscPosRenderer.cs` |
-| Comandos ESC/POS | `src/MotorDsl.Rendering/EscPosCommands.cs` |
-| Registro de renderers | `src/MotorDsl.Core/Engine/RendererRegistry.cs`, `src/MotorDsl.Extensions/MotorDslServiceCollectionExtensions.cs` |
-| Extensibilidad (guía) | `docs/05_arquitectura_tecnica/extensibilidad-motor_v1.1.md`, `docs/10_developer_guide/transports-y-extensibilidad.md` |
-| Tests | `src/MotorDsl.Tests/{EscPosRendererTests,TextRendererTests,QrEscPosTests,BarcodeEscPosTests,TableNodeEscPosTests,RendererRegistryTests}.cs` |
+Guía extendida, con el caso de los transports: `docs/05_arquitectura_tecnica/extensibilidad-motor_v1.1.md`
+y `docs/10_developer_guide/transports-y-extensibilidad.md`.
