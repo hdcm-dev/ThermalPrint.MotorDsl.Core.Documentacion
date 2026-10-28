@@ -1,123 +1,143 @@
 # 00 — Índice maestro
 
-> **Propósito**: dar la visión general del sistema — qué resuelve, cómo se divide en paquetes,
-> qué decisiones lo condicionan y dónde seguir leyendo.
-> **Fuentes primarias**: `README.md`, `docs/README.md`, `PrintThermalDriver.slnx`, `CHANGELOG.md`,
-> `docs/00_contexto/compatibilidad-plataformas_v1.2.md`, los nueve `src/*/*.csproj`.
+> **Propósito**: visión general de MotorDsl como sistema — qué resuelve, cómo se reparte en paquetes,
+> qué decisiones estructurales lo condicionan y dónde está cada cosa.
+> **Fuentes primarias**: `README.md`, `CHANGELOG.md`, `PrintThermalDriver.slnx`, `src/*/*.csproj`,
+> `PrintThermal_Motor_Maui-docs/docs/04-decisions/` (en el repo de documentación).
 
 ---
 
 ## 1. Qué resuelve
 
-Una app móvil que tiene que imprimir un ticket térmico enfrenta dos problemas mezclados: armar
-el contenido del documento y hablar el protocolo de la impresora. MotorDsl los separa.
+Una app .NET MAUI que tiene que imprimir un comprobante en una térmica de bajo costo enfrenta tres
+problemas juntos: describir el documento sin recompilar la app, adaptarlo al ancho y a las
+capacidades del dispositivo concreto, y hablarle a la impresora por un canal físico que varía por
+plataforma. MotorDsl separa los tres: un **DSL JSON** describe el documento, un **pipeline** lo
+adapta y lo convierte a la salida pedida, y un **transport** lo entrega.
 
-El contenido se declara en un **DSL JSON** —una plantilla con nodos de texto, contenedores,
-tablas, imágenes, bucles y condicionales— que la app puede cambiar sin recompilar. El motor
-toma esa plantilla, le aplica los datos, calcula el layout para el ancho del papel y produce
-la salida en el formato que el dispositivo entiende. La entrega física la resuelve un
-**transport** intercambiable.
-
-La consecuencia práctica: cambiar el diseño de un ticket es editar un JSON; cambiar de medio de
-impresión —Bluetooth, red, y mañana USB o BLE— es registrar otro transport, sin tocar el motor.
+Lo que la librería **no** hace: no persiste nada, no expone REST, no descubre impresoras de red, no
+gestiona la UI de la app más allá de los controles que ofrece `MotorDsl.Maui`.
 
 ---
 
-## 2. Stack
+## 2. Los 8 paquetes
 
-| Capa | Tecnología |
-|---|---|
-| Lenguaje / runtime | C# sobre **.NET 10** |
-| Paquetes portables | TFM `net10.0` puro — sin API de plataforma |
-| Paquetes de plataforma | TFM `net10.0-android;net10.0-ios` (MAUI) |
-| Inyección de dependencias | `Microsoft.Extensions.DependencyInjection.Abstractions` 10.0.8 |
-| Serialización | `System.Text.Json` (BCL) |
-| Gráficos y raster | `SkiaSharp.Views.Maui.Controls` 3.119.2 |
-| PDF | `PdfSharpCore` 1.3.67 |
-| Códigos QR | `QRCoder` 1.8.0 |
-| Pruebas | xUnit 2.9.3 · `Microsoft.NET.Test.Sdk` 17.14.1 · coverlet 6.0.4 |
-| SDK fijado en CI | `10.0.102` |
+| Paquete | TFM | Rol | Depende de |
+|---|---|---|---|
+| `MotorDsl.Core` | `net10.0` | Contratos, modelos/AST, `Evaluator`, `LayoutEngine`, validadores, providers en memoria | — |
+| `MotorDsl.Parser` | `net10.0` | `DslParser`: JSON → `DocumentTemplate` | Core |
+| `MotorDsl.Rendering` | `net10.0` | `EscPosRenderer`, `TextRenderer`, `EscPosCommands` | Core |
+| `MotorDsl.Extensions` | `net10.0` | `AddMotorDslEngine()` + `MotorDslBuilder` (fluent DI) | Core, Parser, Rendering |
+| `MotorDsl.Printing.Abstractions` | `net10.0` | `IThermalPrinterTransport`, `IThermalPrinterService`, `ThermalPrinterService`, capacidades, chunking | Core |
+| `MotorDsl.Network` | `net10.0` | Transport TCP 9100 (RAW / JetDirect) | Printing.Abstractions |
+| `MotorDsl.Bluetooth` | `net10.0-android;net10.0-ios` | Transport BT Classic SPP. En iOS lanza `PlatformNotSupportedException` | Printing.Abstractions |
+| `MotorDsl.Maui` | `net10.0-android;net10.0-ios` | Controles MAUI, renderers PDF/bitmap/preview, `MauiPrintErrorHandler`, diagnóstico | Core, Rendering, Extensions, Printing.Abstractions |
 
----
+Metadatos verificables en cada `src/MotorDsl.*/MotorDsl.*.csproj`: `PackageId`, `Description`,
+`PackageLicenseExpression` = MIT, `RepositoryUrl` común. `Authors` es `Fernando Rafael Filipuzzi`
+en siete paquetes y `UTN FRP TUP Aplicada 2025` en `MotorDsl.Bluetooth` — divergencia real, no
+error de índice ([`src/MotorDsl.Bluetooth/MotorDsl.Bluetooth.csproj`](../../../PrintThermal_Motor_Maui/src/MotorDsl.Bluetooth/MotorDsl.Bluetooth.csproj)).
 
-## 3. Los 8 paquetes
+### Grafo de dependencias
 
-```mermaid
-graph TD
-    Core[MotorDsl.Core<br/>net10.0]
-    Parser[MotorDsl.Parser] --> Core
-    Rendering[MotorDsl.Rendering] --> Core
-    Ext[MotorDsl.Extensions] --> Core
-    Ext --> Parser
-    Ext --> Rendering
-    Abs[MotorDsl.Printing.Abstractions] --> Core
-    Net[MotorDsl.Network<br/>net10.0] --> Abs
-    BT[MotorDsl.Bluetooth<br/>android + ios] --> Abs
-    Maui[MotorDsl.Maui<br/>android + ios] --> Core
-    Maui --> Rendering
-    Maui --> Ext
-    Maui --> Abs
+```text
+                       Core
+                        │
+        ┌───────────────┼───────────────┬──────────────────────┐
+     Parser         Rendering    Printing.Abstractions         │
+        │               │           │            │             │
+        └──── Extensions ┘        Network    Bluetooth          │
+                  │                                            │
+                  └────────────────── Maui ────────────────────┘
 ```
 
-| Paquete | TFM | Rol | Índice que lo cubre |
+`MotorDsl.Maui` es la única pieza que depende de las cuatro ramas a la vez, y por eso es el paquete
+que una app instala primero: arrastra `Core`, `Rendering`, `Extensions` y `Printing.Abstractions`
+como dependencias transitivas ([`README.md`](../../../PrintThermal_Motor_Maui/README.md), sección
+«TL;DR»).
+
+---
+
+## 3. El pipeline en una pantalla
+
+```text
+ string DSL           DocumentTemplate      EvaluatedDocument     LayoutedDocument      RenderResult
+    │                       │                      │                     │                   │
+    ├── DslParser ─────────►├── Evaluator ────────►├── LayoutEngine ────►├── IRenderer ─────►│
+    │                       │                      │                     │                   │
+  valida             AST tipado           placeholders/loops     líneas, wrap,        string | byte[]
+ TemplateValidator                        /condiciones ya         alineación,          + Warnings
+                                          resueltos               metadata             + Errors
+```
+
+Las tres validaciones son **opcionales por construcción** (parámetros con default `null` en el
+constructor de `DocumentEngine`), pero `AddMotorDslEngine()` las registra siempre. Detalle en
+[`01_nucleo-pipeline.md`](01_nucleo-pipeline.md).
+
+---
+
+## 4. Decisiones estructurales
+
+| # | Decisión | Consecuencia práctica | ADR |
 |---|---|---|---|
-| `MotorDsl.Core` | `net10.0` | Contratos, modelos/AST, motor, layout, validación, providers en memoria | [01](01_nucleo-pipeline.md), [02](02_dsl-y-modelos.md) |
-| `MotorDsl.Parser` | `net10.0` | JSON del DSL → `DocumentTemplate` + AST | [02](02_dsl-y-modelos.md) |
-| `MotorDsl.Rendering` | `net10.0` | Renderers `text` y `escpos`, tabla de comandos ESC/POS | [03](03_renderizado-base.md) |
-| `MotorDsl.Extensions` | `net10.0` | DI fluent: `AddMotorDslEngine`, `AddTemplates`, `AddProfiles`, `AddRenderer` | [01](01_nucleo-pipeline.md), [03](03_renderizado-base.md) |
-| `MotorDsl.Printing.Abstractions` | `net10.0` | `IThermalPrinterTransport`, `IThermalPrinterService`, orquestador con retry y eventos | [04](04_impresion-transports.md) |
-| `MotorDsl.Network` | `net10.0` | Transport TCP 9100 (RAW / JetDirect) | [04](04_impresion-transports.md) |
-| `MotorDsl.Bluetooth` | `net10.0-android;net10.0-ios` | Transport BT Classic SPP; en iOS compila pero no funciona | [04](04_impresion-transports.md) |
-| `MotorDsl.Maui` | `net10.0-android;net10.0-ios` | Controles, renderers gráficos, error handler y diagnóstico | [05](05_maui-ui-renderers.md) |
+| D1 | Pipeline en etapas con representaciones intermedias | Cada etapa se testea y se sustituye sola; agregar un formato de salida no toca el parser | ADR-0001 |
+| D2 | Extensibilidad por strings: `Target` (renderers) y `Kind` (transports) | Un renderer o transport nuevo se registra por DI sin tocar el núcleo | ADR-0002 |
+| D3 | Dos formatos de DSL: `template` e `integrated` | El documento pre-resuelto salta la etapa Evaluate; el parser y el validador prohíben loops/condicionales ahí | ADR-0003 |
+| D4 | Capacidades de impresora **tri-estado** (`Unknown` / `NotDetected` / `Supported`) | «No contestó» nunca se confunde con «no soporta»; la detección jamás hace fallar la conexión | ADR-0004 |
+| D5 | El transport de red se empaqueta como `net10.0` **puro** | Habilita impresión en iOS sin que ninguna máquina Apple participe del build, y lo hace referenciable desde los tests | ADR-0005 |
 
-`MotorDsl.Tests` (`src/MotorDsl.Tests`) no se publica: declara `IsPackable=false`. Ver
-[07](07_tests.md).
-
-**Un consumidor típico instala dos paquetes**: `MotorDsl.Maui` —que arrastra `Core`,
-`Rendering`, `Extensions` y `Printing.Abstractions` como dependencias transitivas— más el
-transport que corresponda al medio de impresión.
+Los ADR viven en el repositorio de documentación:
+`PrintThermal_Motor_Maui-docs/docs/04-decisions/`. Los cuatro primeros están marcados
+`origin: reverse-engineered` (inferidos del código en `v1.0.13`, pendientes de validación humana);
+el quinto es `origin: human`, derivado de
+`Analisis/03-Analisis-IOs/Nuget-Multiplaforma.md`.
 
 ---
 
-## 4. Decisiones que condicionan el diseño
+## 5. Restricciones de plataforma
 
-| # | Decisión | Por qué | Consecuencia |
+| Capacidad | Android | iOS | Escritorio / tests |
 |---|---|---|---|
-| D1 | El contenido se declara en JSON, no en código | Cambiar un ticket no debe requerir recompilar ni republicar la app | Existe un parser, un validador de plantilla y un evaluador de bindings |
-| D2 | El renderer se elige por el `RenderTarget` del `DeviceProfile`, no por un `if` | Agregar una salida nueva no debe tocar el motor | `IRendererRegistry` resuelve por string; `AddRenderer<T>()` registra |
-| D3 | El transport se elige por el `Kind` del `PrinterDevice` | Bluetooth, red, USB y BLE son intercambiables | `ThermalPrinterService` rutea; varios transports conviven registrados a la vez |
-| D4 | Los seis paquetes portables se mantienen en `net10.0` **puro** | Un TFM sin plataforma se compila y empaqueta en cualquier SO y se consume desde android/ios por herencia | `MotorDsl.Network` se compila en Linux y `MotorDsl.Tests` puede referenciarlo directo |
-| D5 | Bluetooth Classic SPP solo existe en Android | Apple no expone ese perfil a apps de terceros | En iOS, `MotorDsl.Bluetooth` lanza `PlatformNotSupportedException`; imprimir en iOS pasa por `MotorDsl.Network` |
-| D6 | Los 8 paquetes comparten un único número de versión | Evita `NU1605` (downgrade de dependencia) en apps que mezclen varios | La versión se inyecta en `pack` con `-p:PackageVersion`; **no** vive en los `.csproj` |
-| D7 | El `pack` se reparte entre dos runners | `dotnet pack` de un proyecto multi-TFM exige compilar todos sus TFM y el workload `ios` no existe en Linux | Seis paquetes salen del runner self-hosted y dos de `macos-15` |
+| Motor completo (parse → render) | ✅ | ✅ | ✅ |
+| Impresión Bluetooth Classic SPP | ✅ | ❌ `PlatformNotSupportedException` | ❌ |
+| Impresión por red TCP 9100 | ✅ | ✅ | ✅ |
+| Controles y renderers MAUI | ✅ | ✅ | ❌ (TFM de plataforma) |
 
-Detalle de D6 y D7 en [08](08_build-devops.md); de D5 en [04](04_impresion-transports.md) y en
-`docs/00_contexto/compatibilidad-plataformas_v1.2.md`.
-
----
-
-## 5. Estado y evolución
-
-- **`1.0.13`** (2026-07-13) es la última versión publicada. Corrigió el rasterizado de imágenes
-  —`SKBitmap.Decode(byte[])` devolvía `null` en SkiaSharp 3.x y descartaba el ticket completo—
-  y la propagación del estilo `bold` desde el `LayoutEngine`.
-- **`[Unreleased]`** incorpora `MotorDsl.Network` como octavo paquete, el helper público
-  `TransportChunking`, el devcontainer, y la publicación de los 8 paquetes en `cd-nuget.yml`.
-- El roadmap declarado en `README.md` deja pendientes: transport USB, transport BLE,
-  descubrimiento por mDNS/Bonjour, raster con *nearest-neighbor* real y EAN-13 nativo en
-  raster preview y PDF (hoy caen a texto).
+Apple no expone el perfil SPP a apps de terceros: por eso existe `MotorDsl.Network` y por eso una
+app iOS que imprima por red **debe** declarar `NSLocalNetworkUsageDescription` en su `Info.plist`
+—sin esa clave iOS 14+ termina la app sin mensaje útil ([`README.md`](../../../PrintThermal_Motor_Maui/README.md),
+[`CHANGELOG.md`](../../../PrintThermal_Motor_Maui/CHANGELOG.md) § Unreleased).
 
 ---
 
-## 6. Glosario mínimo
+## 6. Dónde está cada cosa
 
-| Término | Significado en este proyecto |
-|---|---|
-| **DSL** | El JSON que describe el documento. Dos formatos: `template` y `integrated` |
-| **AST** | El árbol de `DocumentNode` que produce el parser |
-| **Target** | String que identifica un renderer: `text`, `escpos`, `escpos-bitmap`, `pdf`, `raster-preview` |
-| **Kind** | String que identifica un transport: `bluetooth`, `network` |
-| **`DeviceProfile`** | Perfil del dispositivo de salida: nombre, ancho en caracteres, target y capacidades |
-| **`PrinterProfile`** | Perfil de *pacing* del envío físico: demoras por línea, byte, corte, imagen |
-| **NV logo** | Logo almacenado en la memoria no volátil de la impresora, invocado por keycode |
-| **Formato integrado** | Plantilla con los datos ya resueltos: sin `{{}}`, sin `loop`, sin `conditional` |
+| Busco… | Ruta | Índice |
+|---|---|---|
+| Contratos del motor | `src/MotorDsl.Core/Contracts/` (15 interfaces) | 01 |
+| Orquestador del pipeline | `src/MotorDsl.Core/Engine/DocumentEngine.cs` | 01 |
+| Nodos del AST | `src/MotorDsl.Core/Models/` | 02 |
+| Gramática JSON del DSL | `src/MotorDsl.Parser/DslParser.cs` + `Validation/TemplateValidator.cs` | 02 |
+| Bytes ESC/POS | `src/MotorDsl.Rendering/EscPosCommands.cs` | 03 |
+| Orquestador de impresión con retry | `src/MotorDsl.Printing.Abstractions/Services/ThermalPrinterService.cs` | 04 |
+| Transports concretos | `src/MotorDsl.Bluetooth/`, `src/MotorDsl.Network/` | 04 |
+| Controles XAML | `src/MotorDsl.Maui/Controls/` | 05 |
+| Apps de ejemplo | `samples/` (5 apps) | 06 |
+| Tests | `src/MotorDsl.Tests/` (36 archivos) | 07 |
+| CI/CD | `.github/workflows/` (6 workflows) | 08 |
+| Casos de uso, reglas de negocio, sprints | `docs/` (12 carpetas) | 09 |
+
+---
+
+## 7. Estado y deuda declarada
+
+- **`MotorDsl.Network` sin publicar**: está en `[Unreleased]` del CHANGELOG. Consecuencia visible:
+  `samples/MotorDsl.Nuget.Integrated.MultaApp` volvió a `ProjectReference` con un comentario que lo
+  explica, aunque su nombre y el `samples/Readme.md` digan «NuGet» (ver `06_samples`).
+- **Roadmap abierto** ([`README.md`](../../../PrintThermal_Motor_Maui/README.md) § Roadmap):
+  transport USB, transport BLE, descubrimiento mDNS/Bonjour, raster nearest-neighbor real con
+  `SKCanvasView`, EAN-13 nativo en raster preview y PDF (hoy caen a texto).
+- **Gap documental declarado** en `docs-manifest.yaml` § `gap`: sin `02-requirements` formales, sin
+  `03-data` (la solución no tiene base de datos: el «modelo» es el AST), sin `05-deployment`, sin
+  `06-security-compliance`, sin `07-operations`, sin changelog por paquete, sin OpenAPI, sin guía
+  de migración.

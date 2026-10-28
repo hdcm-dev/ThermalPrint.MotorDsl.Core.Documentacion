@@ -1,215 +1,203 @@
-# 01 — Núcleo y pipeline de ejecución
+# 01 — Núcleo y pipeline
 
-> **Propósito**: explicar cómo el motor convierte una plantilla en una salida — las cuatro
-> etapas del pipeline, los contratos que las sostienen, dónde se valida y cómo se arma todo
-> por inyección de dependencias.
-> **Fuentes primarias**: `src/MotorDsl.Core/` (`Contracts/`, `Engine/`, `Layout/`,
-> `Validation/`, `Providers/`, `Printing/`) y `src/MotorDsl.Extensions/`.
->
-> Los **modelos del AST y el evaluador** se documentan en [02](02_dsl-y-modelos.md); los
-> **renderers concretos**, en [03](03_renderizado-base.md).
+> **Propósito**: cómo corre el pipeline de cuatro etapas, qué contrato cumple cada pieza y cómo se
+> arma el motor por inyección de dependencias.
+> **Fuentes primarias**: `src/MotorDsl.Core/Contracts/`, `src/MotorDsl.Core/Engine/DocumentEngine.cs`,
+> `src/MotorDsl.Core/Layout/LayoutEngine.cs`, `src/MotorDsl.Core/Validation/`,
+> `src/MotorDsl.Extensions/`.
 
 ---
 
-## 1. El pipeline
+## 1. Contratos de `MotorDsl.Core/Contracts/` (15)
 
-```mermaid
-flowchart TD
-    A[DSL JSON] -->|IDslParser.Parse| B[DocumentTemplate + AST]
-    B -->|IEvaluator.Evaluate| C[EvaluatedDocument]
-    C -->|ILayoutEngine.ApplyLayout| D[LayoutedDocument]
-    D -->|IRenderer.Render| E[RenderResult]
-    V1[ITemplateValidator] -.valida antes de parsear.-> B
-    V2[IDataValidator] -.valida antes de evaluar.-> C
-    V3[IProfileValidator] -.valida antes del layout.-> D
-```
+| Interfaz | Método clave | Quién lo implementa |
+|---|---|---|
+| `IDocumentEngine` | `Render(...)` ×3 sobrecargas + `RenderLayout(...)` | `DocumentEngine` |
+| `IDslParser` | `DocumentTemplate Parse(string dsl)` | `DslParser` (paquete Parser) |
+| `IEvaluator` | `Evaluate`, `ResolveVariable`, `EvaluateCondition`, `ResolveCollection` | `Evaluator` |
+| `IDataResolver` | `Resolve(data, path)`, `ResolveCollection(data, path)` | `DataResolver` |
+| `ILayoutEngine` | `LayoutedDocument ApplyLayout(EvaluatedDocument, DeviceProfile)` | `LayoutEngine` |
+| `IRenderer` | `string Target { get; }` + `Render(LayoutedDocument, DeviceProfile)` | 5 renderers (índices 03 y 05) |
+| `IRendererRegistry` | `Register`, `GetRenderer`, `GetAvailableTargets` | `RendererRegistry` |
+| `ITemplateValidator` | `ValidateTemplate(string dslJson)` | `TemplateValidator` |
+| `IDataValidator` | `Validate(DocumentNode ast, object? data)` | `DataValidator` |
+| `IProfileValidator` | `ValidateProfile(DeviceProfile)` | `ProfileValidator` |
+| `IBitmapRasterizer` | `RasterizedImage Rasterize(string source, int widthPixels)` | `SkiaSharpRasterizer` (Maui) |
+| `IPrintErrorHandler` | `HandleErrorAsync`, `OnRetryAttempt`, `OnPrintSuccess` | `DefaultPrintErrorHandler`, `MauiPrintErrorHandler` |
+| `ITemplateProvider` | `GetTemplate(id)`, `GetAvailableTemplateIds()` | `InMemoryTemplateProvider` |
+| `IDataProvider` | `GetData(dataKey)` | `InMemoryDataProvider` |
+| `IDeviceProfileProvider` | `GetProfile(name)`, `GetAll()` | `InMemoryDeviceProfileProvider` |
 
-| Etapa | Contrato | Entrada → salida | Responsabilidad |
-|---|---|---|---|
-| 1. Parseo | `IDslParser` | `string` → `DocumentTemplate` | Convertir el JSON en AST tipado y rechazar lo malformado |
-| 2. Evaluación | `IEvaluator` | `DocumentNode` + datos → `EvaluatedDocument` | Resolver `{{bindings}}`, expandir `loop`, decidir `conditional` |
-| 3. Layout | `ILayoutEngine` | `EvaluatedDocument` + `DeviceProfile` → `LayoutedDocument` | Ajustar al ancho del papel: *wrap*, alineación, columnas de tabla, degradación por capacidad |
-| 4. Renderizado | `IRenderer` | `LayoutedDocument` + `DeviceProfile` → `RenderResult` | Emitir la salida concreta del target |
+Los tres providers son **read-only por contrato**: la fuente real de plantillas, datos y perfiles es
+responsabilidad del consumidor (comentarios XML en `Contracts/ITemplateProvider.cs`,
+`IDataProvider.cs`, `IDeviceProfileProvider.cs`).
 
 ---
 
-## 2. `DocumentEngine` — el orquestador
+## 2. `DocumentEngine` — las cuatro entradas
 
-`src/MotorDsl.Core/Engine/DocumentEngine.cs` implementa `IDocumentEngine` y expone cuatro
-puntos de entrada:
+Fuente: [`src/MotorDsl.Core/Engine/DocumentEngine.cs`](../../../PrintThermal_Motor_Maui/src/MotorDsl.Core/Engine/DocumentEngine.cs) (257 líneas).
 
-| Sobrecarga | Cuándo se usa |
+| Sobrecarga | Para qué | Etapas que corre |
+|---|---|---|
+| `Render(string templateDsl, object data, DeviceProfile)` | Plantilla clásica desde JSON crudo | valida plantilla → Parse → *(delega en la 2.ª)* |
+| `Render(DocumentTemplate, object data, DeviceProfile)` | Plantilla ya parseada | valida datos → valida perfil → Evaluate → Layout → Render |
+| `Render(string integratedJson, DeviceProfile)` | Documento **integrado** (pre-resuelto) | valida plantilla → Parse → guarda de formato → valida perfil → **salta Evaluate** → Layout → Render |
+| `RenderLayout(string, object, DeviceProfile)` | Vista previa en UI sin renderizar | valida ×3 → Parse → Evaluate → Layout |
+
+### Contrato de errores
+
+Las tres sobrecargas de `Render` **nunca lanzan**: capturan toda excepción y devuelven un
+`RenderResult` con `Errors` poblado y `Output = ""`. `RenderLayout` sí lanza
+`InvalidOperationException` cuando una validación falla — es la única asimetría del tipo, y es
+deliberada: devuelve un `LayoutedDocument`, que no tiene dónde alojar errores.
+
+### Severidad y propagación
+
+| Origen | Severidad `Error` | Severidad `Warning` |
+|---|---|---|
+| `TemplateValidator` | aborta, `Output = ""` | se acumula y se agrega al `RenderResult` final |
+| `DataValidator` | aborta | se acumula y se propaga |
+| `ProfileValidator` | aborta | — |
+| `LayoutEngine` | — | `layouted.Warnings` se vuelca al `RenderResult` (degradaciones por capacidad, CU-23) |
+
+El guarda de formato de la tercera sobrecarga es explícito: si el JSON no declara
+`"format": "integrated"`, devuelve un error que nombra la sobrecarga correcta en lugar de renderizar
+mal en silencio.
+
+---
+
+## 3. `RendererRegistry` — resolución por `Target`
+
+Fuente: [`src/MotorDsl.Core/Engine/RendererRegistry.cs`](../../../PrintThermal_Motor_Maui/src/MotorDsl.Core/Engine/RendererRegistry.cs).
+
+Un `Dictionary<string, IRenderer>` indexado por `renderer.Target`. `Register` **sobrescribe** si el
+target ya existía, así que el último registrado gana. `GetRenderer(target)` cae a `"text"` cuando no
+encuentra el target pedido, y devuelve `null` solo si tampoco hay un renderer de texto — en ese caso
+`DocumentEngine.GetRenderer` lanza `InvalidOperationException("No renderer found for target: …")`,
+que el `catch` externo convierte en `RenderResult` con error.
+
+---
+
+## 4. `LayoutEngine` — de AST evaluado a líneas
+
+Fuente: [`src/MotorDsl.Core/Layout/LayoutEngine.cs`](../../../PrintThermal_Motor_Maui/src/MotorDsl.Core/Layout/LayoutEngine.cs) (337 líneas).
+
+Recorre el AST asignando a cada nodo un `LayoutInfo` bajo una clave sintética `node_{contador}`, y
+acumula un `currentLine` global. **El diccionario `NodeLayoutInfo` —no el árbol— es lo que los
+renderers consumen**: recorren sus entradas ordenadas por `LineNumber`, y todo nodo sin
+`WrappedText` es invisible para la salida.
+
+| Tipo de nodo | Qué hace el layout |
 |---|---|
-| `Render(string templateDsl, object data, DeviceProfile)` | Plantilla clásica: parsea, valida, evalúa contra `data`, maqueta y renderiza |
-| `Render(DocumentTemplate template, object data, DeviceProfile)` | Igual, pero con la plantilla ya parseada |
-| `Render(string integratedJson, DeviceProfile)` | Documento en formato `integrated`: **saltea la etapa de evaluación** porque el AST ya viene resuelto |
-| `RenderLayout(string templateDsl, object data, DeviceProfile)` | Devuelve el `LayoutedDocument` sin renderizar; lo usan las vistas previas |
+| `TextNode` | Si el texto entra en `profile.Width`, una línea; si no, `WrapText` corta por palabras y `Height` = nº de líneas |
+| `ContainerNode` | `Height = 0`, recursa en los hijos |
+| `TableNode` | Genera **líneas propias**: cabecera + separador de guiones + una línea por fila, con anchos calculados |
+| `ImageNode` | Una línea con marcador textual y metadata (`is_qr`, `is_barcode`, `is_bitmap`) |
+| `ConditionalNode` | Solo recursa en `TrueBranch` (el Evaluator ya resolvió antes) |
+| `LoopNode` | Recursa en `Children` (el Evaluator ya lo expandió a un `ContainerNode`) |
 
-**Dos regímenes de error, deliberadamente distintos.** Las sobrecargas `Render` nunca lanzan:
-capturan la excepción y devuelven un `RenderResult` con `Output = ""` y el mensaje en
-`Errors`, para que la app pueda mostrar el problema en pantalla. `RenderLayout`, en cambio,
-lanza `InvalidOperationException` cuando una validación falla.
+### Anchos de tabla
 
-**Guarda defensiva del formato integrado.** `Render(json, profile)` verifica que el
-`Format` parseado sea `integrated` y, si no lo es, devuelve un error explícito que indica usar
-la sobrecarga de tres argumentos. Evita que un `template` con `{{}}` sin resolver llegue a la
-impresora con los placeholders impresos.
+`CalculateColumnWidths(numCols, totalWidth)`: una columna → todo el ancho. Con N columnas, reserva
+`N-1` caracteres de separación, le da **la mitad del ancho útil a la columna 0** y reparte el resto
+en partes iguales, distribuyendo el sobrante de a un carácter en las primeras columnas. Las celdas
+que exceden su ancho se **truncan**, no se envuelven (`FormatTableRow`).
 
-**Propagación de advertencias.** Los `Warnings` acumulados en las tres validaciones y en el
-layout se copian al `RenderResult` final. Una advertencia no aborta el documento; un error sí.
+### Estilos que sobreviven al layout
 
----
+Solo dos atributos de `Style.Attributes` cruzan al `LayoutInfo`: `align` (a `LayoutInfo.Alignment`)
+y `bold` (a `DeviceMetadata["bold"]`). Cualquier otro atributo del JSON se pierde en esta etapa.
+La propagación de `bold` es un arreglo posterior al release 1.0.13 —antes solo se leía `align`, y
+los textos con `"bold": true` salían sin negrita ([`CHANGELOG.md`](../../../PrintThermal_Motor_Maui/CHANGELOG.md) § 1.0.13).
 
-## 3. Los quince contratos de `MotorDsl.Core/Contracts`
+### Degradación por capacidades (CU-23)
 
-| Contrato | Miembros clave | Implementación por defecto |
-|---|---|---|
-| `IDocumentEngine` | las 4 sobrecargas de la §2 | `Engine/DocumentEngine.cs` |
-| `IDslParser` | `Parse(string) → DocumentTemplate` | `MotorDsl.Parser/DslParser.cs` |
-| `IEvaluator` | `Evaluate`, `ResolveVariable`, `EvaluateCondition`, `ResolveCollection` | `Evaluators/Evaluator.cs` |
-| `IDataResolver` | `Resolve(data, path)`, `ResolveCollection` | `Models/DataResolver.cs` |
-| `ILayoutEngine` | `ApplyLayout(EvaluatedDocument, DeviceProfile)` | `Layout/LayoutEngine.cs` |
-| `IRenderer` | `Target { get; }`, `Render(...)` | `TextRenderer`, `EscPosRenderer`, y los tres de MAUI |
-| `IRendererRegistry` | `Register`, `GetRenderer`, `GetAvailableTargets` | `Engine/RendererRegistry.cs` |
-| `IBitmapRasterizer` | `Rasterize(source, widthPixels) → RasterizedImage` | `SkiaSharpRasterizer` (en `MotorDsl.Maui`) |
-| `ITemplateValidator` | `ValidateTemplate(dslJson)` | `Validation/TemplateValidator.cs` |
-| `IDataValidator` | `Validate(ast, data)` | `Validation/DataValidator.cs` |
-| `IProfileValidator` | `ValidateProfile(profile)` | `Validation/ProfileValidator.cs` |
-| `ITemplateProvider` | `GetTemplate(id)`, `GetAvailableTemplateIds()` | `Providers/InMemoryTemplateProvider.cs` |
-| `IDataProvider` | `GetData(dataKey)` | `Providers/InMemoryDataProvider.cs` |
-| `IDeviceProfileProvider` | `GetProfile(name)`, `GetAll()` | `Providers/InMemoryDeviceProfileProvider.cs` |
-| `IPrintErrorHandler` | `HandleErrorAsync`, `OnRetryAttempt`, `OnPrintSuccess` | `Printing/DefaultPrintErrorHandler.cs` |
+`ApplyImageNodeLayout` consulta `profile.GetCapability(...)` con la regla
+`IsCapabilityExplicitlyFalse`: solo degrada cuando la capacidad está declarada **explícitamente en
+`false`**; ausente o `Unknown` significa «intentalo». Al degradar agrega un warning a
+`layoutedDoc.Warnings`, que `DocumentEngine` propaga al `RenderResult`.
 
-Los tres providers `InMemory*` son diccionarios: sirven para registrar plantillas, datos y
-perfiles al arrancar la app. Un consumidor que necesite traerlos de una API implementa el
-contrato y lo registra en su lugar.
-
----
-
-## 4. `DeviceProfile` — el perfil del dispositivo de salida
-
-`src/MotorDsl.Core/Models/DeviceProfile.cs` es el parámetro que atraviesa las etapas 3 y 4.
-
-| Miembro | Tipo | Rol |
-|---|---|---|
-| `Name` | `string` (solo lectura) | Identificador del perfil |
-| `Width` | `int` (solo lectura) | Ancho útil **en caracteres** — de esto depende el *wrap* y el ancho de columnas |
-| `RenderTarget` | `string` (solo lectura) | **Elige el renderer**: `escpos`, `escpos-bitmap`, `pdf`, `raster-preview`, `text` |
-| `CodePage` / `CodePageCommand` | `int?` / `byte[]?` | Página de códigos y el comando que la selecciona |
-| `BaudRate` | `int?` | Informativo para el transport |
-| `SupportedBarcodes` | `List<string>?` | Simbologías que el hardware acepta |
-| `SetCapability` / `GetCapability` / `HasCapability` | diccionario interno | Capacidades arbitrarias por string |
-
-Las capacidades son el mecanismo de **degradación** del layout: si el perfil declara
-explícitamente `supports_qr = false`, `supports_barcode = false` o `supports_bitmap = false`,
-el `LayoutEngine` degrada ese nodo a texto y deja una advertencia. Una capacidad **ausente** no
-se interpreta como falsa: solo degrada lo declarado explícitamente en falso
-(`IsCapabilityExplicitlyFalse`, `LayoutEngine.cs:178`).
-
-> No confundir con `PrinterProfile` (`MotorDsl.Printing.Abstractions`), que gobierna las
-> demoras del envío físico. Ver [04](04_impresion-transports.md).
-
----
-
-## 5. `LayoutEngine`
-
-`src/MotorDsl.Core/Layout/LayoutEngine.cs` (337 líneas) recorre el AST evaluado y produce un
-`LayoutedDocument`: el mismo árbol más un diccionario `NodeLayoutInfo` con un `LayoutInfo` por
-nodo.
-
-`LayoutInfo` transporta línea y columna, ancho y alto, alineación, el texto ya envuelto
-(`WrappedText`, `IsWrapped`), si hubo truncado, y un `DeviceMetadata` libre por el que viajan
-al renderer los atributos de estilo — hoy `align` y `bold`.
-
-Trabajo concreto que hace:
-
-- **Texto**: envuelve al ancho del perfil (`WrapText`) y calcula la alineación.
-- **Tablas**: reparte el ancho entre columnas (`CalculateColumnWidths`) y formatea cada fila
-  (`FormatTableRow`).
-- **Imágenes**: según el `Role` del nodo (`qr`, `barcode`, imagen común) consulta la capacidad
-  correspondiente y, si está explícitamente negada, degrada y agrega la advertencia
-  —`"QR degradado: dispositivo no soporta QR"` y equivalentes.
-
----
-
-## 6. Las tres validaciones
-
-| Validador | Qué mira | Momento |
-|---|---|---|
-| `TemplateValidator` | El JSON en crudo: campos raíz obligatorios, tipos de nodo válidos, formato declarado, y en `integrated` que **no** queden placeholders `{{}}` | Antes de parsear |
-| `DataValidator` | El AST contra los datos: que cada binding resuelva, distinguiendo los alias introducidos por un `loop` | Antes de evaluar |
-| `ProfileValidator` | El `DeviceProfile`: coherencia de nombre, ancho y target | Antes del layout |
-
-Los tres devuelven un `ValidationResult` con una lista de `ValidationError`, cada uno con
-`Field`, `Type` (`MissingField`, `TypeMismatch`, `InvalidStructure`, `InvalidSyntax`,
-`MissingRequiredField`, `UnknownNodeType`, `UnsupportedInIntegratedFormat`,
-`UnresolvedPlaceholder`), `Message`, `NodeType`, una `Severity` (`Error` | `Warning`) y una
-`Location` opcional. `IsValid` es verdadero mientras no haya ningún error de severidad `Error`:
-las advertencias no invalidan.
-
-Los tres son **opcionales** en el constructor de `DocumentEngine`. Si no se registran, el motor
-funciona sin validar. `AddMotorDslEngine()` los registra.
-
----
-
-## 7. `RendererRegistry` y el fallback a texto
-
-`Engine/RendererRegistry.cs` es un diccionario `Target → IRenderer`. Registrar dos renderers
-con el mismo `Target` deja al último.
-
-`GetRenderer(target)` tiene un **fallback silencioso a `"text"`** cuando el target pedido no
-existe. Es lo que permite que un perfil apuntando a un target no registrado siga produciendo
-algo legible en lugar de fallar; el costo es que un target mal escrito no se nota como error.
-Si tampoco hay renderer `text`, devuelve `null` y `DocumentEngine` lanza
-`InvalidOperationException("No renderer found for target: …")`.
-
----
-
-## 8. Armado por inyección de dependencias
-
-`src/MotorDsl.Extensions/` provee el punto de entrada `AddMotorDslEngine()`, que registra como
-singletons: `DslParser`, `Evaluator`, `LayoutEngine`, los tres validadores, `DocumentEngine`, y
-un `IRendererRegistry` que **prerregistra `TextRenderer` y `EscPosRenderer`** y luego suma
-todos los `IRenderer` que haya en el contenedor.
-
-Devuelve un `MotorDslBuilder` encadenable:
-
-| Método | Efecto |
+| Capacidad | Si es `false` |
 |---|---|
-| `AddTemplates(cfg)` | Arma un `InMemoryTemplateProvider` y lo registra como `ITemplateProvider` |
-| `AddProfiles(cfg)` | Arma un `InMemoryDeviceProfileProvider` y lo registra como `IDeviceProfileProvider` |
-| `AddRenderer<T>()` | Registra `T` como `IRenderer`; el registry lo recoge |
+| `supports_qrcode` | El QR sale como texto plano del dato + warning «QR degradado» |
+| `supports_barcode` | Sale `[BARCODE: dato]` + warning «Barcode degradado» |
+| `supports_images` | Sale `[IMG-DEGRADED: …]` truncado a 20 caracteres + warning |
+
+---
+
+## 5. `DeviceProfile` — el contrato con el dispositivo
+
+Fuente: [`src/MotorDsl.Core/Models/DeviceProfile.cs`](../../../PrintThermal_Motor_Maui/src/MotorDsl.Core/Models/DeviceProfile.cs).
+
+Tres propiedades de solo lectura fijadas en el constructor —`Name`, `Width` (en **caracteres**, no
+en píxeles) y `RenderTarget`— más un bolsón de capacidades `string → object` con
+`SetCapability` / `GetCapability` / `HasCapability`. Hay además cuatro propiedades opcionales
+declaradas y **no consumidas por el motor**: `CodePage`, `CodePageCommand`, `BaudRate`,
+`SupportedBarcodes`.
+
+Capacidades que el código sí lee, con su consumidor:
+
+| Clave | Tipo | Leída en |
+|---|---|---|
+| `supports_qrcode`, `supports_barcode`, `supports_images` | `bool` | `LayoutEngine` (degradación) |
+| `bitmap_max_width_px` | `int` (default 384) | `EscPosRenderer`, `BitmapEscPosRenderer` |
+| `nv_logo_keycode` | `int` | `EscPosRenderer` (ruteo a recall NV) |
+| `nv_logo_kind` | `"gsl"` \| `"fs"` | `EscPosRenderer` (qué familia de comando emitir) |
+| `codepage` | `"437"` \| `"850"` | `EscPosRenderer.GetEncoding` (solo QR y barcode) |
+
+`ProfileValidator` exige lo mínimo: `Name` no vacío, `Width > 0`, `RenderTarget` no vacío.
+
+---
+
+## 6. Armado por DI
+
+Fuente: [`src/MotorDsl.Extensions/MotorDslServiceCollectionExtensions.cs`](../../../PrintThermal_Motor_Maui/src/MotorDsl.Extensions/MotorDslServiceCollectionExtensions.cs).
 
 ```csharp
-builder.Services.AddMotorDslEngine()
-    .AddTemplates(t => t.Add("acta-infraccion", MultaDsl.Template))
-    .AddProfiles(p =>
-    {
-        p.Add(new DeviceProfile("thermal_58mm", 32, "escpos-bitmap"));
-        p.Add(new DeviceProfile("preview",      32, "raster-preview"));
-        p.Add(new DeviceProfile("a4-pdf",       80, "pdf"));
-    })
-    .AddMotorDslMaui();          // renderers y controles MAUI — ver índice 05
+services.AddMotorDslEngine()          // registra el pipeline completo, devuelve MotorDslBuilder
+        .AddTemplates(t => t.Add("id", dslJson))
+        .AddProfiles(p => p.Add(new DeviceProfile("thermal_58mm", 32, "escpos-bitmap")))
+        .AddRenderer<MiRenderer>()
+        .AddMotorDslMaui();           // extensión del paquete Maui
 ```
 
-**Orden importante**: `AddRenderer<T>()` debe llamarse *antes* de resolver el
-`IRendererRegistry`, porque la factory del registry enumera los `IRenderer` una sola vez, al
-construirse el singleton.
+`AddMotorDslEngine()` registra como **singleton**: `IDslParser`, `IEvaluator`, `ILayoutEngine`,
+`IDataValidator`, `ITemplateValidator`, `IProfileValidator`, `IDocumentEngine` y un
+`IRendererRegistry` construido por fábrica. Esa fábrica registra primero `TextRenderer` y
+`EscPosRenderer` —siempre presentes— y después **todos los `IRenderer` del contenedor**, de modo
+que un `AddRenderer<T>()` con `Target = "escpos"` reemplaza al built-in.
+
+`MotorDslBuilder` no es un contenedor propio: expone `Services` y tres métodos que arman providers
+en memoria y los registran ya poblados
+([`src/MotorDsl.Extensions/MotorDslBuilder.cs`](../../../PrintThermal_Motor_Maui/src/MotorDsl.Extensions/MotorDslBuilder.cs)).
 
 ---
 
-## 9. Manejo de errores de impresión
+## 7. Modelos de resultado
 
-`Models/PrintError.cs` clasifica la falla en `PrintErrorType`: `Connection`, `Timeout`,
-`Hardware`, `Protocol`, `Unknown`. `PrintError.FromException` mapea `PrinterHardwareException`
-→ `Hardware`; `IOException` y `SocketException` → `Connection`; `TimeoutException` y
-`TaskCanceledException` → `Timeout`; el resto → `Unknown`.
+| Tipo | Campos | Notas |
+|---|---|---|
+| `EvaluatedDocument` | `Id`, `Version` (`required`), `Root?`, `Warnings`, `Errors` | `Root` puede ser `null` si un conditional sin rama falsa se descarta |
+| `LayoutedDocument` | `Root?`, `NodeLayoutInfo`, `TotalWidth/Height`, `DeviceProfile?`, `LayoutMetadata`, `Warnings` | `Warnings` es get-only |
+| `RenderResult` | `Target`, `Output?` (`string` o `byte[]`), `Warnings`, `Errors` | `IsSuccessful => Errors.Count == 0`; helpers `ToHexString()` y `ToBase64()` devuelven `null` si `Output` no es `byte[]` |
+| `LayoutInfo` | `LineNumber`, `ColumnNumber`, `Width`, `Height`, `Alignment`, `IsWrapped`, `WrappedText`, `IsTruncated`, `DeviceMetadata` | `IsTruncated` se declara pero el `LayoutEngine` nunca lo pone en `true` |
 
-`DefaultPrintErrorHandler` (`Printing/DefaultPrintErrorHandler.cs`) decide reintentar ante
-`Connection`, `Timeout` y `Unknown`, y **no** reintentar ante `Hardware` ni `Protocol` —una
-tapa abierta o un comando rechazado no mejoran repitiendo. `OnRetryAttempt` y `OnPrintSuccess`
-son *no-op* virtuales, pensados para que la capa de UI los sobrescriba: eso hace
-`MauiPrintErrorHandler` (ver [05](05_maui-ui-renderers.md)).
+---
 
-`PrintRetryOptions` fija los valores por defecto: `MaxRetries = 3`, `InitialDelayMs = 500`. El
-uso de todo esto en el envío real está en [04](04_impresion-transports.md).
+## 8. Puntos de atención
+
+- **`LayoutEngine` guarda estado**: `_nodeCounter` es un campo de instancia reseteado al inicio de
+  `ApplyLayout`. Registrado como singleton, no es seguro para llamadas concurrentes.
+- **El árbol y el diccionario pueden divergir**: `LayoutedDocument.Root` es el AST evaluado, pero
+  los renderers leen `NodeLayoutInfo`. Un nodo sin `WrappedText` existe en el árbol y no aparece en
+  la salida.
+- **`Evaluator` tiene sobrecargas privadas muertas**: varias versiones sin el parámetro `warnings`
+  (`EvaluateNode`, `EvaluateTextNode`, `EvaluateConditionalNode`, `EvaluateLoopNode`,
+  `EvaluateContainerNode`) no las llama nadie dentro de la clase.
+- **`EvaluateTemplate` es API pública fuera del contrato**: `Evaluator` la expone pero `IEvaluator`
+  no la declara, así que se pierde al inyectar por la interfaz.
+
+Ver también: [`02_dsl-y-modelos.md`](02_dsl-y-modelos.md) para el AST y la gramática,
+[`03_renderizado-base.md`](03_renderizado-base.md) para lo que hace cada renderer con el
+`NodeLayoutInfo`.
