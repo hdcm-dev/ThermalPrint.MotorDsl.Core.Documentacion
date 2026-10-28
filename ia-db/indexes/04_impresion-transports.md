@@ -1,318 +1,289 @@
-# 04 — Impresión: orquestador y transports
+# 04 — Impresión y transports
 
-> **Propósito**: documentar cómo los bytes llegan a la impresora — el contrato de transport, el
-> orquestador con retry y eventos, los dos transports implementados (red TCP y Bluetooth
-> Classic SPP), la detección de capacidades y los logos NV.
-> **Fuentes primarias**: `src/MotorDsl.Printing.Abstractions/`, `src/MotorDsl.Network/`,
-> `src/MotorDsl.Bluetooth/`, `docs/00_contexto/compatibilidad-plataformas_v1.2.md`,
-> `docs/10_developer_guide/transports-y-extensibilidad.md`.
->
-> La **generación** de los bytes está en [03](03_renderizado-base.md); la clasificación de
-> errores y el `IPrintErrorHandler`, en [01 §9](01_nucleo-pipeline.md).
+> **Propósito**: cómo viaja el `byte[]` desde el motor hasta la impresora — orquestador, retry,
+> detección de capacidades, los dos transports concretos y el aprovisionamiento de logos NV.
+> **Fuentes primarias**: `src/MotorDsl.Printing.Abstractions/`, `src/MotorDsl.Bluetooth/`,
+> `src/MotorDsl.Network/`, `docs/10_developer_guide/transports-y-extensibilidad.md`.
 
 ---
 
-## 1. El modelo
+## 1. Las dos capas
 
-```mermaid
-graph LR
-    App[App MAUI] --> Svc[ThermalPrinterService<br/>IThermalPrinterService]
-    Svc -->|Kind = network| Net[NetworkPrinterTransport]
-    Svc -->|Kind = bluetooth| BT[BluetoothPrinterTransport]
-    Net --> P1[Impresora TCP 9100]
-    BT --> P2[Impresora BT Classic SPP]
+```text
+App  →  IThermalPrinterService  →  IThermalPrinterTransport  →  Impresora
+        (orquesta: retry,           (habla el canal:
+         eventos, historial,         SPP / TCP / futuros)
+         ruteo por Kind)
 ```
 
-Un único servicio agnóstico orquesta; los transports implementan el medio. **Varios transports
-pueden estar registrados a la vez**: el servicio elige por el `Kind` del `PrinterDevice`.
+`ThermalPrinterService` es único y agnóstico; los transports son intercambiables y se registran
+tantos como haga falta. El ruteo es por el string `Kind`.
+
+| `Kind` | Transport | Plataformas | Registro |
+|---|---|---|---|
+| `bluetooth` | `BluetoothPrinterTransport` | Android (iOS lanza `PlatformNotSupportedException`) | `AddBluetoothPrinterTransport()` |
+| `network` | `NetworkPrinterTransport` | Android, iOS, escritorio | `AddNetworkPrinterTransport(o => o.AddPrinter("192.168.1.50"))` |
+| `fake` | `FakeTransport` | solo tests | `src/MotorDsl.Tests/TestFakes.cs` |
+
+Ambos pueden convivir en el mismo contenedor: `DiscoverDevicesAsync` combina lo que reporta cada
+uno y `ConnectAsync` elige el transport cuyo `Kind` coincide con `device.Kind`.
 
 ---
 
-## 2. `IThermalPrinterTransport` — el contrato del medio
+## 2. `IThermalPrinterTransport`
 
-| Miembro | Rol |
-|---|---|
-| `Kind` | String que identifica el medio: `"bluetooth"`, `"network"` |
-| `IsConnected`, `CurrentDevice` | Estado |
-| `Capabilities` | `PrinterCapabilities?`; **por defecto `null`** (miembro con implementación por defecto) |
-| `DiscoverAsync(ct)` | Enumera dispositivos disponibles |
-| `ConnectAsync(deviceId, ct)` / `DisconnectAsync()` | Conexión |
-| `WriteBytesAsync(data, profile, ct)` | El envío real, con el pacing del `PrinterProfile` |
-| `ProvisionLogoAsync` / `IsLogoProvisionedAsync` / `ClearLogoAsync` | Logos NV; **tienen implementación por defecto** que responde «transport no soporta NV» |
+Fuente: [`src/MotorDsl.Printing.Abstractions/Contracts/IThermalPrinterTransport.cs`](../../../PrintThermal_Motor_Maui/src/MotorDsl.Printing.Abstractions/Contracts/IThermalPrinterTransport.cs).
 
-Los miembros con implementación por defecto son lo que hace barato escribir un transport
-nuevo: alcanza con las cinco operaciones básicas.
+| Miembro | Obligatorio | Notas |
+|---|---|---|
+| `Kind`, `IsConnected`, `CurrentDevice` | Sí | identidad y estado |
+| `DiscoverAsync`, `ConnectAsync`, `DisconnectAsync`, `WriteBytesAsync` | Sí | ciclo de vida y envío |
+| `Capabilities` | No — default `null` | tri-estado detectado al conectar |
+| `ProvisionLogoAsync`, `IsLogoProvisionedAsync`, `ClearLogoAsync` | No — **default interface methods** | no-op para transports que no soportan NV |
+
+Los tres métodos de NV traen implementación por defecto en la interfaz precisamente para que un
+transport nuevo no tenga que saber nada de logos: `ProvisionLogoAsync` devuelve
+`NvLogoResult(false, null, "transport no soporta NV")`.
 
 ---
 
 ## 3. `ThermalPrinterService` — el orquestador
 
-`src/MotorDsl.Printing.Abstractions/Services/ThermalPrinterService.cs` implementa
-`IThermalPrinterService`, que extiende `INotifyPropertyChanged` para que la UI se enganche por
-binding.
+Fuente: [`src/MotorDsl.Printing.Abstractions/Services/ThermalPrinterService.cs`](../../../PrintThermal_Motor_Maui/src/MotorDsl.Printing.Abstractions/Services/ThermalPrinterService.cs) (281 líneas).
 
-### Estado observable
+Implementa `INotifyPropertyChanged`: `IsConnected`, `CurrentDevice`, `ConnectionState` y
+`LastError` notifican cambios, que es lo que hace bindeables los controles de `MotorDsl.Maui`.
 
-`IsConnected`, `CurrentDevice`, `ConnectionState`, `LastError`, `CurrentCapabilities` (delegado
-al transport activo) y `RecentFailures`. `PrinterConnectionState` recorre `Disconnected` →
-`Scanning` → `Connecting` → `Connected` → `Reconnecting` → `Failed`.
+### Estados
 
-### Eventos
+```text
+Disconnected → Scanning → Disconnected        (descubrimiento sin conexión previa)
+Disconnected → Connecting → Connected | Failed
+Connected    → Reconnecting → Connected | Failed
+```
 
-`ErrorOccurred` (con el `PrintError`) y `DevicesDiscovered` (con la lista combinada).
+`PrinterConnectionState` tiene seis valores: `Disconnected`, `Scanning`, `Connecting`, `Connected`,
+`Reconnecting`, `Failed`.
 
-### Descubrimiento
+### Construcción
 
-`DiscoverDevicesAsync(kind?)` recorre **todos** los transports —o solo los del `Kind` pedido—,
-combina los resultados y dispara `DevicesDiscovered`. Si un transport falla, se registra el
-error y **se sigue con los demás**: un Bluetooth apagado no impide listar las impresoras de
-red. El estado de conexión previo se restaura al terminar.
+Exige **al menos un transport**: con la colección vacía lanza `InvalidOperationException` nombrando
+`AddBluetoothPrinterTransport` como ejemplo. Es un fallo temprano deliberado, no un fallo al
+imprimir.
 
-### Conexión
+### `SendBytesAsync` — el bucle de retry
 
-`ConnectAsync(device)` busca el transport cuyo `Kind` coincida. Sin coincidencia deja
-`LastError = "No transport registered for kind '…'"`, emite un `PrintError` de tipo `Protocol`
-y devuelve `false` — no lanza.
+```text
+para intento = 1 .. retry.MaxRetries (default 3):
+    escribir por el transport activo
+    éxito  → errorHandler.OnPrintSuccess(intento); return
+    fallo  → PrintError.FromException(...)
+             disparar ErrorOccurred
+             preguntar al IPrintErrorHandler si reintentar
+             si NO reintenta o se agotaron los intentos:
+                 registrar el fallo en el historial y relanzar envuelto
+             esperar InitialDelayMs * 2^(intento-1)   (500, 1000, 2000 ms)
+             intentar reconectar en silencio
+```
 
-### Envío con reintentos
+El backoff es exponencial con base `InitialDelayMs = 500`. La reconexión silenciosa solo actúa si
+el transport quedó con `IsConnected == false` — que es exactamente lo que ambos transports hacen al
+invalidar su estado ante un error de socket.
 
-`SendBytesAsync(data, profile?, retry?, ct)` usa `PrinterProfile.Thermal58mm` y
-`new PrintRetryOptions()` como valores por defecto. Por cada intento:
+### Clasificación de errores
 
-1. delega en `_activeTransport.WriteBytesAsync`;
-2. si funciona, llama a `OnPrintSuccess(attempt)` y termina;
-3. si falla, arma el `PrintError`, emite `ErrorOccurred` y consulta al `IPrintErrorHandler`;
-4. si el handler dice no reintentar **o** se agotaron los intentos, registra **una** entrada en
-   el historial de fallos y lanza;
-5. si reintenta: `OnRetryAttempt`, espera con **backoff exponencial**
-   (`InitialDelayMs * 2^(intento-1)`) e intenta reconectar en silencio. Con los valores por
-   defecto —3 intentos, 500 ms inicial— las esperas efectivas son 500 y 1000 ms: el tercer
-   fallo lanza sin esperar.
+`PrintError.FromException` mapea la excepción a un `PrintErrorType`:
 
-Sin transport activo, lanza `InvalidOperationException("No hay un transport activo…")`.
+| Excepción | Tipo | ¿Reintenta el handler por defecto? |
+|---|---|---|
+| `PrinterHardwareException` | `Hardware` | **No** — papel o tapa, reintentar no arregla nada |
+| `IOException`, `SocketException` | `Connection` | Sí |
+| `TimeoutException`, `TaskCanceledException` | `Timeout` | Sí |
+| cualquier otra | `Unknown` | Sí |
+
+Por eso los transports relanzan `IOException`/`SocketException` **sin envolver**: envolverlas en
+`Exception` las degradaría a `Unknown` y se perdería la precisión de la clasificación. Está
+comentado así en el código de ambos.
 
 ### Historial de fallos
 
-`RecentFailures` guarda hasta **20** `PrintFailureEntry` (constante `MAX_FAILURES`, acceso
-protegido por lock). Cada entrada lleva timestamp, identificación del dispositivo, un snapshot
-de las capacidades al momento del fallo, tipo y mensaje del error, cantidad de intentos, la
-**longitud** de los bytes y el render target. El comentario del código es explícito:
-`BytesLength` es *longitud, NUNCA el payload* — el historial no guarda el contenido impreso.
+Ring buffer de **20 entradas** (`MAX_FAILURES`), protegido por `lock`, no persistido a disco. Se
+registra **una** entrada por envío agotado, no una por intento. Cada `PrintFailureEntry` guarda
+timestamp, identidad del dispositivo, snapshot de capacidades, tipo y mensaje del error, número de
+intentos y la **longitud** del payload —nunca el payload—. `RecentFailures` devuelve una copia;
 `ClearFailures()` lo vacía.
 
 ---
 
-## 4. `PrinterProfile` — pacing del envío
-
-`Models/PrinterProfile.cs` no describe *qué* se imprime sino *a qué ritmo* se entrega.
-
-| Propiedad | Por defecto | Qué demora |
-|---|---|---|
-| `LineDelayMs` | 150 | entre líneas |
-| `ByteDelayMs` | 5 | por bloque enviado (piso de 1 ms) |
-| `InitDelayMs` | 100 | antes del primer bloque |
-| `FinalDelayMs` | 500 | después del último |
-| `QrDelayMs` | 300 | tras un QR |
-| `ImageDelayMs` | 500 | tras una imagen |
-| `CutDelayMs` | 500 | tras el corte |
-| `InitCommandDelayMs` | 300 | tras el comando de init |
-
-Dos perfiles predefinidos: `Thermal58mm` (genérico) y `Real58HB6` (calibrado para la
-impresora 58HB6-6101). Los valores extra de `Real58HB6` salen de pruebas con hardware real;
-ver `docs/10_developer_guide/perfiles-impresoras-reales.md`.
-
-> No confundir con `DeviceProfile` (`MotorDsl.Core`), que gobierna el renderizado. Ver
-> [01 §4](01_nucleo-pipeline.md).
-
----
-
-## 5. `MotorDsl.Network` — transport TCP 9100
-
-Paquete `net10.0` **puro**: usa `System.Net.Sockets`, que es BCL. Por eso se compila y
-empaqueta en cualquier sistema operativo, se consume desde `net10.0-android` y `net10.0-ios`
-por herencia de TFM, y `MotorDsl.Tests` puede referenciarlo directamente. Es **el camino para
-imprimir desde iOS**.
-
-`Kind = "network"`. `Capabilities` devuelve `null`: no hay detección de capacidades sobre TCP.
-
-### Configuración
+## 4. Capacidades tri-estado (ADR-0004)
 
 ```csharp
-builder.Services.AddNetworkPrinterTransport(o => o
-    .AddPrinter("192.168.1.50"));      // puerto 9100 por defecto
+enum CapabilitySupport { Unknown, NotDetected, Supported }
+
+record PrinterCapabilities(
+    CapabilitySupport StatusFeedback,
+    CapabilitySupport NvGraphics,
+    string? NvGraphicsKind,   // "gsl" | "fs" | null
+    string? ModelId);         // best-effort desde GS I
 ```
 
-| Opción de `NetworkPrinterOptions` | Por defecto |
-|---|---|
-| `KnownEndpoints` | vacía — `AddPrinter(endpoint)` agrega |
-| `ConnectTimeout` | 5 s |
-| `WriteTimeout` | 30 s |
-| `ChunkSize` | `TransportChunking.DefaultChunkSize` (256) |
+La distinción que justifica el enum: en térmicas de bajo costo, «no contestó» suele significar
+«estaba ocupada», no «no lo soporta». `Unknown` es el valor de partida
+(`PrinterCapabilities.Unknown()`) y también el destino cuando la detección falla.
 
-### Descubrimiento
-
-No hay descubrimiento activo: `DiscoverAsync` devuelve los endpoints configurados, marcados
-como `IsPaired: true`. El descubrimiento por mDNS/Bonjour figura como pendiente en el roadmap.
-
-### Parseo de endpoints
-
-`NetworkPrinterTransport.Endpoints.cs` acepta `host`, `host:puerto` y `[ipv6]:puerto`, con
-`DefaultPort = 9100`. Una IPv6 sin corchetes se acepta solo si parsea como IP completa (los
-dos puntos serían ambiguos como separador de puerto).
-
-### Traducción de errores — deliberada
-
-| Situación | Qué lanza | Por qué |
-|---|---|---|
-| Vence `ConnectTimeout` o `WriteTimeout` | `TimeoutException` | `PrintError.FromException` la clasifica como `Timeout`, que **sí** reintenta |
-| `SocketException` / `IOException` | se relanzan **sin envolver** | Ya se clasifican como `Connection`; envolverlas en `Exception` las volvería `Unknown` y se perdería la precisión |
-
-Ante socket roto se invalida la conexión antes de relanzar, para que la reconexión silenciosa
-del servicio —que solo actúa si `IsConnected` quedó en `false`— tenga efecto en el próximo
-intento. `DisconnectAsync` **nunca lanza**: el código de limpieza suele llamarla sin
-try/catch.
-
-### Envío
-
-Parte el buffer con `TransportChunking.ChunkBuffer` y escribe bloque por bloque con un pacing
-de respaldo de una demora por bloque. El comentario del código aclara que sobre TCP estos
-delays son conservadores y no imprescindibles, a diferencia de SPP, que no tiene RTS/CTS.
+`PrintStrategySelector.RecommendTarget(caps, docNeedsGraphics)` recomienda `"escpos"` si el soporte
+NV es `Supported` y `"escpos-bitmap"` en cualquier otro caso. El parámetro `docNeedsGraphics` está
+declarado, descartado con `_ = docNeedsGraphics` y reservado para heurísticas futuras.
 
 ---
 
-## 6. `MotorDsl.Bluetooth` — transport BT Classic SPP
+## 5. `BluetoothPrinterTransport` (Android)
 
-`Kind = "bluetooth"`. TFM `net10.0-android;net10.0-ios`, pero **el código real está bajo
-`#if ANDROID`**: en iOS cada operación lanza
-`PlatformNotSupportedException("iOS no soporta Bluetooth Classic SPP. Usar BLE o impresion por red.")`.
-El motivo es de plataforma, no de implementación: Apple no expone el perfil SPP a apps de
-terceros.
+Cinco archivos `partial` en [`src/MotorDsl.Bluetooth/`](../../../PrintThermal_Motor_Maui/src/MotorDsl.Bluetooth/):
 
-Conecta por el UUID estándar de SPP `00001101-0000-1000-8000-00805F9B34FB`.
-
-### Archivos
-
-| Archivo | Contenido | Bajo `#if ANDROID` |
+| Archivo | Contenido | ¿Puro? |
 |---|---|---|
-| `BluetoothPrinterTransport.cs` | Discover, connect, disconnect, write | sí |
-| `BluetoothPrinterTransport.Chunking.cs` | `ChunkBuffer` interno | **no** |
-| `BluetoothPrinterTransport.Capabilities.cs` | Parseo de status y decisiones de pacing | **no** |
-| `BluetoothPrinterTransport.Detection.cs` | Sondeo de capacidades y control de flujo | sí |
-| `BluetoothPrinterTransport.Nv.cs` | Provisión y borrado de logos NV | sí |
+| `BluetoothPrinterTransport.cs` | Ciclo de vida y `WriteBytesAsync` | No (`#if ANDROID`) |
+| `.Detection.cs` | Sondeos DLE EOT / GS ( L / GS I, lectura no bloqueante | No |
+| `.Nv.cs` | Definir / consultar / borrar logos NV | No |
+| `.Capabilities.cs` | Clasificación de bytes de status, decisión de pacing, `ParseGsV0` | **Sí** |
+| `.Chunking.cs` | `ChunkBuffer` | **Sí** |
 
-Que `Chunking` y `Capabilities` vivan fuera de los bloques condicionales y sin dependencias de
-plataforma es lo que permite a `MotorDsl.Tests` —un proyecto `net10.0`— probarlos: el `.csproj`
-de tests los enlaza por `<Compile Include>` en vez de referenciar el paquete. Ver
-[07](07_tests.md).
+Los dos últimos son código puro sin dependencias de plataforma, y por eso `MotorDsl.Tests` los
+enlaza **por fuente** (`<Compile Include=… Link=…>`): el proyecto targetea `net10.0-android`/`-ios`
+y no se puede referenciar desde un `net10.0`.
 
-### Envío con control de flujo por status
+### Conexión
 
-Bloques de **256 bytes fijos**. El chunking es por tamaño y no por salto de línea a propósito:
-la salida `escpos-bitmap` contiene bytes `0x0A` dentro de los datos de píxeles, así que partir
-por LF corrompería la imagen.
+UUID SPP estándar `00001101-0000-1000-8000-00805F9B34FB` sobre RFCOMM. `DiscoverAsync` **solo lista
+dispositivos ya emparejados** (`BondedDevices`) — no hace descubrimiento activo. Verifica que el
+adaptador exista, esté encendido y, desde Android 12 (API 31), que `BLUETOOTH_CONNECT` esté
+concedido; cada caso lanza con un mensaje accionable.
 
-Si la detección determinó que la impresora reporta status (`StatusFeedback == Supported`), el
-transport consulta el estado antes de cada bloque y gatea la escritura. La documentación del
-propio código declara el **límite honesto** de la técnica: `DLE EOT` informa liveness, papel y
-error en tiempo real, **no** los bytes libres del buffer. No es control de flujo perfecto;
-sirve para detectar caídas antes de escribir a ciegas y para fallar claro ante falta de papel
-o tapa abierta.
+Tras conectar se captura el `InputStream` Java subyacente para poder usar `Available()` y leer sin
+bloquear. Si no se logra, el flow control degrada solo. La detección de capacidades corre
+inmediatamente después y está envuelta en su propio `try/catch`: **nunca puede hacer fallar la
+conexión**.
 
-Antes del primer bloque hay un *fast-fail* de hardware que lanza `PrinterHardwareException`
-—clasificada como `Hardware`, que el handler **no** reintenta: una tapa abierta no se arregla
-repitiendo.
+### Escritura y flow control
 
-### Degradación del pacing
+Chunks fijos de **256 bytes** sobre todo el buffer. El tamaño es fijo a propósito: la salida
+`escpos-bitmap` contiene `0x0A` arbitrarios dentro de los datos de píxeles, así que no se puede
+partir por saltos de línea.
 
-`NextPacingDecision` implementa una máquina de estados de tres salidas:
+Con `StatusFeedback == Supported`, antes de cada bloque consulta `DLE EOT n=1` y decide:
 
 | Status leído | Decisión |
 |---|---|
 | `Ready` | escribir ya, sin pacing fijo |
 | `Busy` | escribir igual, con pacing de respaldo |
-| `Unknown` | **degradar**: pacing fijo desde este bloque en adelante |
+| `Unknown` | **degradar** a pacing fijo para todo el resto del envío |
 
-Una vez degradado no se vuelve a consultar el status en ese envío. El status se considera
-legible solo si los bits fijos del byte coinciden con el patrón esperado
-(`HasValidStatusFixedBits`: `(b & 0b1001_0011) == 0b0001_0010`); cualquier otra cosa —timeout,
-basura, eco— es `Unknown`. **La degradación nunca aborta el envío.**
+La degradación es irreversible dentro de un mismo envío (`NextPacingDecision`). El límite está
+declarado en el propio código: `DLE EOT` da liveness, papel y error en tiempo real, **no** bytes
+libres del buffer — no es flow control perfecto, pero evita escribir a ciegas.
 
-### Detección de capacidades
+Antes del primer bloque hay un fast-fail de hardware (`DLE EOT n=4` y `n=2`): fin de papel o tapa
+abierta lanzan `PrinterHardwareException`, que el handler clasifica como `Hardware` y **no**
+reintenta.
 
-`BluetoothPrinterTransport.Detection.cs` sondea al conectar y llena `PrinterCapabilities`:
-
-| Campo | Cómo se obtiene |
-|---|---|
-| `StatusFeedback` | `ProbeStatusFeedbackAsync` — clasifica la respuesta al pedido de status |
-| `NvGraphics` | `ProbeNvGraphicsAsync` — prueba las familias de comando |
-| `NvGraphicsKind` | `"gsl"`, `"fs"` o `null`, según qué familia respondió |
-| `ModelId` | `ProbeModelIdAsync` — *best-effort* desde `GS I`, o `null` |
-
-`CapabilitySupport` tiene tres valores: `Unknown`, `NotDetected`, `Supported`. La distinción
-importa: `Unknown` significa que no se pudo averiguar, no que no esté.
-
-`PrintStrategySelector.RecommendTarget(caps, docNeedsGraphics)` traduce eso a una
-recomendación de render target: `"escpos"` si hay gráficos NV soportados, y `"escpos-bitmap"`
-en caso contrario.
+Ante `IOException` (típicamente *broken pipe* por overrun), invalida la conexión y relanza sin
+envolver, para que el servicio reconecte en el próximo intento.
 
 ### Logos NV
 
-`BluetoothPrinterTransport.Nv.cs` implementa la **definición** de logos en memoria no volátil,
-que el renderer no puede hacer porque requiere diálogo con el dispositivo:
-`BuildGslDefine` / `BuildGslDelete` (familia `GS ( L`), `BuildFsqDefine` (familia `FS q`) y
-`IsKeycodeDefinedViaGslAsync` para consultar. `ParseGsV0` (en `Capabilities.cs`) desarma el
-comando de imagen raster para extraer ancho, alto y bits, que es lo que la definición NV
-necesita.
+`ProvisionLogoAsync` recibe **el mismo `byte[]` GS v 0** que la app ya produce para imágenes
+inline: `ParseGsV0` lo desarma en `(widthBytes, heightDots, bits)` y lo re-emite como definición NV,
+probando primero `GS ( L` (moderno) y cayendo a `FS q` (legacy). `IsLogoProvisionedAsync` consulta
+`GS ( L fn=64`; `ClearLogoAsync` emite el borrado por keycode. El resultado viaja en
+`NvLogoResult(Success, Kind, Message)` y actualiza las capacidades del transport.
 
-`ProvisionLogoAsync` devuelve un `NvLogoResult(Success, Kind, Message)`. El *recall* —el
-comando corto que imprime el logo ya grabado— sí está del lado del renderer; ver
-[03 §4](03_renderizado-base.md).
-
-Flujo completo del caso: grabar el logo una vez con `ProvisionLogoAsync`, dejar
-`nv_logo_keycode` (y opcionalmente `nv_logo_kind`) como capacidades del `DeviceProfile`, y a
-partir de ahí cada ticket emite unos pocos bytes en lugar del bitmap entero.
+La ganancia: un logo aprovisionado se imprime después con **11 bytes** de recall en vez de re-enviar
+el raster completo en cada ticket.
 
 ---
 
-## 7. `TransportChunking` — helper compartido
+## 6. `NetworkPrinterTransport` (multiplataforma)
 
-`src/MotorDsl.Printing.Abstractions/TransportChunking.cs` expone públicamente
-`DefaultChunkSize = 256` y `ChunkBuffer(data, size)`, un iterador de `ArraySegment<byte>` sin
-copias. Se extrajo del transport Bluetooth para que cualquier transport lo reutilice;
-`MotorDsl.Network` lo usa.
+Fuente: [`src/MotorDsl.Network/`](../../../PrintThermal_Motor_Maui/src/MotorDsl.Network/).
 
----
+TCP crudo al puerto **9100** (RAW / JetDirect). El TFM es `net10.0` **puro y deliberado**: no usa
+ninguna API nativa —`System.Net.Sockets` es BCL—, así que se consume desde `net10.0-android` y
+`net10.0-ios` por herencia de TFM, se empaqueta en cualquier sistema operativo y es referenciable
+directamente desde los tests (ADR-0005, y el comentario extenso en el `.csproj`).
 
-## 8. Matriz de plataformas
+### Opciones
 
-| Paquete | Android | iOS | Escritorio |
-|---|---|---|---|
-| `MotorDsl.Network` | ✅ | ✅ | ✅ |
-| `MotorDsl.Bluetooth` | ✅ | ❌ `PlatformNotSupportedException` | ❌ |
+| Propiedad | Default |
+|---|---|
+| `KnownEndpoints` | vacío — hay que sembrarlo con `AddPrinter(...)` |
+| `ConnectTimeout` | 5 s |
+| `WriteTimeout` | 30 s |
+| `ChunkSize` | 256 (`TransportChunking.DefaultChunkSize`) |
 
-**Permisos que la app consumidora debe declarar:**
+**No hay descubrimiento**: `DiscoverAsync` devuelve los endpoints preconfigurados. mDNS/Bonjour
+está en el roadmap.
 
-| Plataforma | Para | Clave |
+### Parseo de endpoints
+
+`TryParseEndpoint` acepta cuatro formas y valida el rango de puerto 1–65535:
+
+| Entrada | Host | Puerto |
 |---|---|---|
-| Android | Bluetooth | `BLUETOOTH_SCAN` (con `neverForLocation`), `BLUETOOTH_CONNECT`, `ACCESS_FINE_LOCATION` |
-| Android | Red | `INTERNET`, `ACCESS_NETWORK_STATE` |
-| iOS | Red local | `NSLocalNetworkUsageDescription` en `Info.plist` |
+| `192.168.1.50` | `192.168.1.50` | 9100 |
+| `192.168.1.50:9100` | `192.168.1.50` | 9100 |
+| `[fe80::1]:9100` | `fe80::1` | 9100 |
+| `fe80::1` (sin corchetes) | `fe80::1` | 9100 — no se le puede separar el puerto sin ambigüedad |
 
-La clave de iOS es obligatoria desde iOS 14 y su ausencia es especialmente traicionera: **el
-sistema termina la app sin un mensaje de error útil**. `MotorDsl.Bluetooth` no necesita ninguna
-clave en iOS porque no funciona ahí.
+`FormatEndpoint` re-encorcheta las IPv6 al normalizar el id del dispositivo.
 
-Detalle completo por paquete en `docs/00_contexto/compatibilidad-plataformas_v1.2.md`.
+### Timeouts y errores
+
+`ConnectAsync` traduce su propio vencimiento a `TimeoutException` —distinguiendo el timeout interno
+de una cancelación del llamador con `when (!ct.IsCancellationRequested)`— para que el handler lo
+clasifique como `Timeout` y reintente. `SocketException` e `IOException` suben sin envolver.
+`WriteBytesAsync` aplica el mismo criterio y, ante cualquiera de los dos, invalida la conexión.
+
+El pacing por bloque se mantiene aunque sobre TCP el control de flujo real lo aporta el protocolo:
+está documentado en el código como conservador, no imprescindible —a diferencia de SPP, que no
+tiene RTS/CTS.
+
+Implementa `IDisposable`.
 
 ---
 
-## 9. Escribir un transport propio
+## 7. Chunking compartido
 
-1. Implementar `IThermalPrinterTransport` con un `Kind` nuevo. Las tres operaciones de NV
-   pueden omitirse: tienen implementación por defecto.
-2. Registrarlo como `IThermalPrinterTransport` en el contenedor —puede convivir con los otros.
-3. Crear `PrinterDevice` con ese `Kind`; el servicio rutea solo.
+`TransportChunking.ChunkBuffer(data, size = 256)` en `MotorDsl.Printing.Abstractions` es el helper
+público para que cualquier transport reutilice el troceo. Valida `data != null` y `size > 0`, y
+devuelve `ArraySegment<byte>` perezosos, sin copiar.
 
-Al traducir excepciones, respetar el criterio de `MotorDsl.Network` (§5): lanzar
-`TimeoutException` para los vencimientos propios y **no envolver** `IOException` ni
-`SocketException`, para no perder la clasificación que decide el reintento.
+`MotorDsl.Bluetooth` conserva su propia copia `internal` en `.Chunking.cs` —para poder testearla por
+enlace de fuente— con la misma semántica.
+
+---
+
+## 8. Escribir un transport propio
+
+1. Implementar `IThermalPrinterTransport` con un `Kind` nuevo.
+2. Dejar `Capabilities` en `null` si no se detecta nada, y no implementar los métodos NV si no
+   aplican: sus defaults ya responden correctamente.
+3. Ante error de canal, **invalidar el estado interno** (`IsConnected = false`, liberar recursos) y
+   **relanzar sin envolver** las excepciones que `PrintError.FromException` ya clasifica bien.
+4. Traducir los timeouts propios a `TimeoutException`.
+5. Registrar con `services.AddSingleton<IThermalPrinterTransport, MiTransport>()`.
+
+`NetworkPrinterTransport` es la referencia más corta y limpia; `BluetoothPrinterTransport` la más
+completa. Guía narrativa: `docs/10_developer_guide/transports-y-extensibilidad.md`.
+
+---
+
+## 9. Perfiles de temporizado
+
+`PrinterProfile` (distinto de `DeviceProfile`, que describe el papel y el render) agrupa los delays
+del canal: `LineDelayMs` 150, `ByteDelayMs` 5, `InitDelayMs` 100, `FinalDelayMs` 500, `QrDelayMs`
+300, `ImageDelayMs` 500, `CutDelayMs` 500, `InitCommandDelayMs` 300.
+
+Dos perfiles estáticos: `Thermal58mm` (genérico, el default de `SendBytesAsync`) y `Real58HB6`
+(medido sobre una 58HB6-6101 real). De los ocho campos, los transports consumen tres:
+`InitDelayMs`, `ByteDelayMs` (como pacing por bloque, con piso de 1 ms) y `FinalDelayMs`.
