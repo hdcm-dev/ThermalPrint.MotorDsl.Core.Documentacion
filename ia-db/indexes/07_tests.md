@@ -2,7 +2,7 @@
 
 > **Propósito**: inventario de la suite, cómo está organizada, qué cubre y dónde queda el borde sin
 > cubrir.
-> **Fuentes primarias**: `src/MotorDsl.Tests/` (36 archivos), `.github/workflows/ci.yml`,
+> **Fuentes primarias**: `src/MotorDsl.Tests/` (37 `.cs` + `.csproj`; commit `0f8413d`), `.github/workflows/ci.yml`,
 > `docs/08_calidad_y_pruebas/`.
 
 ---
@@ -13,11 +13,17 @@
 |---|---|
 | Framework | xUnit 2.9.3 · `Microsoft.NET.Test.Sdk` 17.14.1 · `coverlet.collector` 6.0.4 |
 | TFM | `net10.0` (`IsPackable = false`) |
-| Archivos | 36 (35 de pruebas + `TestFakes.cs`) |
-| Métodos `[Fact]` | 275 |
-| Métodos `[Theory]` | 10, con 31 `[InlineData]` |
-| Casos ejecutables | **306** (275 + 31), por conteo estático |
+| Archivos | 37 (36 de pruebas + `TestFakes.cs`) |
+| Métodos `[Fact]` | 281 |
+| Métodos `[Theory]` | 11, con 34 `[InlineData]` |
+| Métodos de prueba | 292 (281 + 11) |
+| Casos ejecutables | **315** (281 + 34), por conteo estático (`grep` de atributos) |
 
+Fuente: `src/MotorDsl.Tests/MotorDsl.Tests.csproj` (paquetes y TFM) y `src/MotorDsl.Tests/*.cs`.
+
+> Columna **Casos** de §2: `[Fact]` + `[InlineData]` por archivo (casos ejecutables). La versión
+> anterior de este índice mezclaba métodos y casos en varias filas; se corrigió.
+>
 > El conteo es **estático**: no hay SDK .NET en la máquina donde se generó esta base, así que la
 > suite no se corrió. El CHANGELOG menciona que `ci.yml` dejó de declarar un número fijo de tests
 > porque «decía 185 cuando la suite ya corría 259» — otra razón para no citar un número de corrida
@@ -59,23 +65,24 @@
 | Archivo | Casos | Cubre |
 |---|---|---|
 | `TextRendererTests.cs` | 15 | Alineación, padding, truncado |
-| `EscPosRendererTests.cs` | 6 | Init, codepage, alineación, corte |
+| `EscPosRendererTests.cs` | 7 | Init, codepage, alineación; cola por defecto = corte parcial `GS V 1`; `end_of_ticket=cut_full` → `GS V 0` |
 | `QrEscPosTests.cs` | 3 | Secuencia `GS ( k` |
 | `BarcodeEscPosTests.cs` | 3 | `GS k 2` + terminador NUL |
-| `TableNodeEscPosTests.cs` | 4 | Cabecera, separador, anchos de columna |
+| `TableNodeEscPosTests.cs` | 4 | Cabecera, separador, anchos de columna; termina en `GS V 1` |
+| `EndOfTicketTests.cs` | 10 | `EscPosCommands.EndOfTicket`: default parcial, `cut_full`, `none`, `feed` (acotado a 255, 0 → vacío); `PrintNotConfirmedException` → `PrintErrorType.Protocol` |
 
 ### Impresión y transports
 
 | Archivo | Casos | Cubre |
 |---|---|---|
 | `NetworkTransportTests.cs` | 12 | Conexión, timeouts, invalidación, escritura |
-| `NetworkEndpointTests.cs` | 10 | `TryParseEndpoint` con IPv4, IPv6, puertos |
+| `NetworkEndpointTests.cs` | 22 | `TryParseEndpoint` con IPv4, IPv6, puertos |
 | `NetworkTransportDiTests.cs` | 4 | `AddNetworkPrinterTransport` y opciones |
-| `Phase4NvLogoTests.cs` | 13 | Aprovisionamiento NV, `ParseGsV0`, recall |
-| `StatusFlowControlTests.cs` | 8 | `ParseStatusByte`, `NextPacingDecision` |
-| `CapabilityDetectionTests.cs` | 3 | `ClassifyStatusResponse`, bits fijos |
+| `Phase4NvLogoTests.cs` | 15 | Aprovisionamiento NV, `ParseGsV0`, recall |
+| `StatusFlowControlTests.cs` | 9 | `ParseStatusByte`, `PrinterHardwareException` → `Hardware` (se quitaron los 2 tests de `NextPacingDecision`) |
+| `CapabilityDetectionTests.cs` | 6 | `ClassifyStatusResponse`, bits fijos |
 | `CU23CapabilityTests.cs` | 7 | Degradación por capacidad en el layout |
-| `TransportChunkingTests.cs` | 8 | Helper público de troceo |
+| `TransportChunkingTests.cs` | 9 | Helper público de troceo |
 | `ChunkBufferTests.cs` | 6 | Copia `internal` del chunker Bluetooth |
 | `PrintErrorHandlerTests.cs` | 5 | Política de reintento por tipo de error |
 | `PrintFailureLogTests.cs` | 4 | Ring buffer de 20, sin payload |
@@ -106,7 +113,7 @@ proyecto `net10.0`. Para cubrir igual su lógica pura, el `.csproj` de tests enl
 ```
 
 Son justamente los dos archivos sin dependencias de plataforma. Así se testean `ChunkBuffer`,
-`ClassifyStatusResponse`, `ParseStatusByte`, `NextPacingDecision` y `ParseGsV0` sin contaminar el
+`ClassifyStatusResponse`, `ParseStatusByte` y `ParseGsV0` sin contaminar el
 paquete NuGet con un TFM `net10.0` que no le corresponde.
 
 `MotorDsl.Network`, en cambio, se referencia como proyecto normal — es una de las ventajas
@@ -115,6 +122,18 @@ declaradas de haberlo hecho `net10.0` puro (ADR-0005).
 `MotorDsl.Printing.Abstractions` declara `<InternalsVisibleTo Include="MotorDsl.Tests" />` para
 exponer miembros `internal` como `ThermalPrinterService.RecordFailure`, y así probar la semántica
 del ring buffer sin pasar por el bucle de retry completo.
+
+---
+
+## 3.b Cambios desde `e688f3c`
+
+| Commit | Efecto en la suite |
+|---|---|
+| `2b16fbc` fix(bluetooth) | Se elimina el sondeo `DLE EOT` por bloque y con él `NextPacingDecision`; `StatusFlowControlTests.cs` pierde el latch de degradación (−2 `[Fact]`) |
+| `01a4151` feat(escpos) | Nuevo `EndOfTicketTests.cs`; `EscPosRendererTests.cs` y `TableNodeEscPosTests.cs` pasan a esperar corte parcial (`0x01`) como default; +1 test `cut_full` |
+
+Detalle funcional de la cola del ticket y la confirmación: `03_renderizado-base.md` y
+`04_impresion-transports.md`.
 
 ---
 
@@ -135,12 +154,15 @@ del ring buffer sin pasar por el bucle de retry completo.
 Lo que la suite **no** puede alcanzar, por construcción:
 
 - **Todo lo que vive detrás de `#if ANDROID`**: `BluetoothSocket`, streams RFCOMM, permisos, la
-  detección real por `DLE EOT`. Solo se prueban las funciones puras extraídas a los dos partials.
+  detección real por `DLE EOT` y la confirmación de impresión que lanza
+  `PrintNotConfirmedException` (`src/MotorDsl.Bluetooth/BluetoothPrinterTransport.Detection.cs`):
+  sólo se prueba su clasificación como `Protocol`. Solo se prueban las funciones puras extraídas a los dos partials.
 - **`MotorDsl.Maui` entero**: TFM de plataforma, no referenciable desde `net10.0`. Quedan sin
   cobertura `SkiaSharpRasterizer`, `PdfRenderer`, `RasterPreviewRenderer`,
   `BitmapEscPosRenderer`, los seis controles y `MauiDiagnosticsReportProvider`.
 - **Los samples**: no hay pruebas de UI ni de integración sobre las apps.
-- **Hardware real**: no hay pruebas contra una impresora física ni contra un socket TCP vivo.
+- **Hardware real**: no hay pruebas automatizadas contra una impresora física ni contra un socket TCP vivo
+  (el acta de 200 infracciones de `4b18745` es una prueba de carga manual de sample, ver `06_samples.md`).
 
 Los dos primeros huecos son estructurales, no descuidos: cubrirlos exigiría un proyecto de pruebas
 con TFM de plataforma y un runner con emulador.

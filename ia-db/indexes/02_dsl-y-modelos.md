@@ -5,6 +5,8 @@
 > **Fuentes primarias**: `src/MotorDsl.Parser/DslParser.cs`, `src/MotorDsl.Core/Models/`,
 > `src/MotorDsl.Core/Evaluators/Evaluator.cs`, `src/MotorDsl.Core/Validation/TemplateValidator.cs`,
 > `docs/10_developer_guide/formato-dsl-templates.md`.
+> **Vigencia**: ia-db v3.0, verificado contra `main` @ `0f8413d` (2026-09-24). Conteos de líneas
+> obtenidos con `wc -l` (estáticos; no se compiló ni se ejecutaron tests).
 
 ---
 
@@ -212,7 +214,17 @@ Cada error lleva `Field`, `Type` (enum `ValidationErrorType`), `Message`, `NodeT
 | `…/ticket-con-barcode.json` | EAN-13 |
 | `…/acta-infraccion.json` | Acta con infractor, loop de infracciones, QR y firma |
 | `…/factura-simplificada.json` | Tabla de items + condiciones de pago + QR |
-| `samples/MotorDsl.MultaApp/Templates/MultaDsl.cs` | Plantilla clásica embebida en C# + datos de ejemplo |
+| `samples/MotorDsl.MultaApp/Templates/MultaDsl.cs` | Plantilla clásica embebida en C# + datos de ejemplo; desde `4b18745`, `GetCargaData(int cantidad = 200)` reutiliza la misma plantilla con N ítems en el `loop` de `infracciones` (prueba de carga; detalle de uso en `06_samples.md`) |
 | `samples/MotorDsl.Integrated.MultaApp/Templates/MultaIntegratedDsl.cs` | La misma acta en formato integrado |
 
 Especificación narrativa completa: `docs/10_developer_guide/formato-dsl-templates.md`.
+
+---
+
+## 9. Cambios desde la base anterior (`e688f3c..0f8413d`)
+
+| Ámbito | Cambio | Fuente |
+|---|---|---|
+| Parser, Evaluator, Validator, DataResolver, nodos | **Sin cambios** (`git diff --stat` vacío sobre `src/MotorDsl.Parser`, `src/MotorDsl.Core/Evaluators`, `src/MotorDsl.Core/Validation`) | — |
+| `src/MotorDsl.Core/Models/` | Se agrega `PrintNotConfirmedException.cs` y en `PrintError.cs` una línea que la mapea a `PrintErrorType.Protocol`: pertenecen a impresión, no al DSL → ver `04_impresion-transports.md` | `src/MotorDsl.Core/Models/PrintNotConfirmedException.cs` |
+| Datos de ejemplo | `MultaDsl.GetCargaData` (acta de 200 infracciones) — ejercita `loop` sin tocar la gramática | `samples/MotorDsl.MultaApp/Templates/MultaDsl.cs` |

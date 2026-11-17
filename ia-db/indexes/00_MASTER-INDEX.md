@@ -2,6 +2,7 @@
 
 > **Propósito**: visión general de MotorDsl como sistema — qué resuelve, cómo se reparte en paquetes,
 > qué decisiones estructurales lo condicionan y dónde está cada cosa.
+> **Versión del índice**: 3.0 — repo de código en `main` @ `0f8413d` (2026-09-24); base anterior `e688f3c`.
 > **Fuentes primarias**: `README.md`, `CHANGELOG.md`, `PrintThermalDriver.slnx`, `src/*/*.csproj`,
 > `PrintThermal_Motor_Maui-docs/docs/04-decisions/` (en el repo de documentación).
 
@@ -123,21 +124,49 @@ app iOS que imprima por red **debe** declarar `NSLocalNetworkUsageDescription` e
 | Transports concretos | `src/MotorDsl.Bluetooth/`, `src/MotorDsl.Network/` | 04 |
 | Controles XAML | `src/MotorDsl.Maui/Controls/` | 05 |
 | Apps de ejemplo | `samples/` (5 apps) | 06 |
-| Tests | `src/MotorDsl.Tests/` (36 archivos) | 07 |
-| CI/CD | `.github/workflows/` (6 workflows) | 08 |
+| Tests | `src/MotorDsl.Tests/` (37 archivos `.cs`, conteo estático) | 07 |
+| CI/CD | `.github/workflows/` (7 workflows) | 08 |
+| Build local de samples desde Linux (Docker efímero) | `scripts/local-devcontainer/` | 08 |
+| Cola del ticket (`end_of_ticket`) | `src/MotorDsl.Rendering/EscPosCommands.cs` | 03 |
+| Confirmación de impresión BT (`GS I 67`) | `src/MotorDsl.Bluetooth/BluetoothPrinterTransport.cs`, `src/MotorDsl.Core/Models/PrintNotConfirmedException.cs` | 04 |
 | Casos de uso, reglas de negocio, sprints | `docs/` (12 carpetas) | 09 |
 
 ---
 
-## 7. Estado y deuda declarada
+## 7. Versiones publicadas (según `CHANGELOG.md`)
 
-- **`MotorDsl.Network` sin publicar**: está en `[Unreleased]` del CHANGELOG. Consecuencia visible:
-  `samples/MotorDsl.Nuget.Integrated.MultaApp` volvió a `ProjectReference` con un comentario que lo
-  explica, aunque su nombre y el `samples/Readme.md` digan «NuGet» (ver `06_samples`).
+La versión no vive en los `.csproj`: se inyecta en pack con `-p:PackageVersion` / `-p:MotorDslVersion`
+([`CHANGELOG.md`](../../../PrintThermal_Motor_Maui/CHANGELOG.md), encabezado).
+
+| Versión | Fecha | Hito en el dominio global | Detalle |
+|---|---|---|---|
+| 1.0.13 | 2026-07-13 | Primera versión registrada en el CHANGELOG | — |
+| 1.0.15 | 2026-08-26 | `MotorDsl.Network` entra como **octavo paquete** (habilita iOS) | 04 |
+| 1.0.16 | 2026-08-26 | `WriteTimeout` en BT; API de fase 4 publicada | 04, 06 |
+| 1.0.17 | 2026-08-27 | **Cambio de comportamiento**: cola por defecto `GS V 1` (corte parcial) en lugar de `GS V 0`; capability `end_of_ticket` en `DeviceProfile`; barrera de drenaje `GS I 67` en BT con `PrinterProfile.ConfirmPrintTimeoutMs` (default 120 s, `0` la desactiva) | 03, 04 |
+| Unreleased | — | `scripts/local-devcontainer/` (APK de los cinco samples en contenedor Docker) | 08 |
+
+Reparto de responsabilidades que fija 1.0.17: `DeviceProfile` describe **qué y cómo se renderiza**
+(la cola la emite el renderer); `PrinterProfile`, **las temporizaciones del envío**
+([`CHANGELOG.md`](../../../PrintThermal_Motor_Maui/CHANGELOG.md) § 1.0.17; `ConfirmPrintTimeoutMs = 120_000` en `src/MotorDsl.Printing.Abstractions/Models/PrinterProfile.cs`).
+
+---
+
+## 8. Estado y deuda declarada
+
+- **`MotorDsl.Nuget.Integrated.MultaApp` volvió a `PackageReference` 1.0.17** (antes `ProjectReference`
+  por API no publicada); vuelve a validar los paquetes publicados. No referencia `MotorDsl.Network`
+  ([`samples/MotorDsl.Nuget.Integrated.MultaApp/MotorDsl.Nuget.Integrated.MultaApp.csproj`](../../../PrintThermal_Motor_Maui/samples/MotorDsl.Nuget.Integrated.MultaApp/MotorDsl.Nuget.Integrated.MultaApp.csproj); ver 06).
 - **Roadmap abierto** ([`README.md`](../../../PrintThermal_Motor_Maui/README.md) § Roadmap):
   transport USB, transport BLE, descubrimiento mDNS/Bonjour, raster nearest-neighbor real con
   `SKCanvasView`, EAN-13 nativo en raster preview y PDF (hoy caen a texto).
-- **Gap documental declarado** en `docs-manifest.yaml` § `gap`: sin `02-requirements` formales, sin
-  `03-data` (la solución no tiene base de datos: el «modelo» es el AST), sin `05-deployment`, sin
+- **Gap documental declarado** en `docs-manifest.yaml` § `gap` (repo de documentación): sin
+  `02-requirements` formales, sin `03-data` (el «modelo» es el AST), sin `05-deployment`, sin
   `06-security-compliance`, sin `07-operations`, sin changelog por paquete, sin OpenAPI, sin guía
   de migración.
+- **Divergencia del manifest con el código**: `docs-manifest.yaml` dice que el CHANGELOG cubre «solo
+  v1.0.13» y que no hay breaking changes documentados; el CHANGELOG actual registra 1.0.15–1.0.17 y
+  marca 1.0.17 como cambio de comportamiento. Las ADR 0001–0005 no cubren las decisiones de 1.0.17
+  (cola del ticket, barrera de drenaje).
+- Lo anterior es análisis estático: no hay SDK .NET en el host de indexado; no se afirma que
+  compile ni que los tests pasen.
