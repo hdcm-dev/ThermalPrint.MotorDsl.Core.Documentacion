@@ -11,6 +11,24 @@ generados conforme al Marco de Documentación de Software.
 
 ### Cambiado
 
+- **`ia-db/` regenerada desde cero (versión 3.0)** sobre `PrintThermal_Motor_Maui` @`0f8413d`
+  (rama `main`, 2026-09-24), reemplazando la 2.0 sobre `@e688f3c`. Incorpora los 12 commits
+  intermedios: `PrintNotConfirmedException` y la barrera de confirmación de impresión (`GS I 67`),
+  la cola del ticket (`EndOfTicket`) y sus tests, Bluetooth sin sondeos DLE EOT dentro de la carga
+  útil, `scripts/local-devcontainer/`, `cd-ios-multaapp.nuget.yml`, el acta de 200 infracciones de
+  MultaApp y la versión publicada `1.0.17`. Se conserva la numeración `00`…`09` del
+  `docs-manifest.yaml`.
+
+  Observaciones sobre el repositorio de código, registradas sin corregirse —indexar no lo
+  modifica—: `samples/MotorDsl.Integrated.MultaApp/MotorDsl.Integrated.MultaApp.csproj` queda con un
+  `<ItemGroup>` sin cerrar desde `4b18745` (no se pudo comprobar sin SDK si MSBuild lo rechaza), y
+  `samples/Readme.md` sigue desactualizado respecto de las referencias de los samples.
+
+  Verificación: 11 archivos (2267 líneas; ninguno supera el techo de 500 del perfil), 0 enlaces
+  internos rotos, 119/119 rutas de código citadas existen en `git ls-files` de `0f8413d`; cada
+  índice pasó una verificación adversarial contra el código. Conteo de tests **estático**
+  (315 casos: 281 `[Fact]` y 34 `InlineData`); no se corrió `dotnet test`.
+
 - **`ia-db/` regenerada desde cero** sobre `PrintThermal_Motor_Maui` @`e688f3c` (rama `main`),
   reemplazando la base del 2026-08-07, que reflejaba `@83677eb` (v1.0.13). Se regeneró en lugar de
   actualizarse de forma incremental por decisión del PO. Incorpora lo que el commit indexado agrega
@@ -41,6 +59,11 @@ generados conforme al Marco de Documentación de Software.
   `Features/03-Extender-A-IOs/`. Solo movimientos: el contenido de los cuatro prompts no cambia.
 
 ### Añadido
+
+- **`ENTREGA.md`**: delegación del merge al agente asentada (regla del PO del 2026-10-25), con
+  techo, intervalo y guardas G1–G4.
+- **CI `Verificar`** (`.github/workflows/verificar.yml` + `scripts/verificar_ia_db.py`): enlaces
+  internos de la ia-db y tabla de delegación, en cada PR (control G3).
 
 - **Análisis UX/UI del flujo de impresión** (`Analisis/Analisis-UX-UI.md`): relevamiento de los flujos
   de usuario de los PoC `Ejemplo_Maui_Hibrida` y `Ejemplo_MotorDSL_Dialog`, con 7 hallazgos

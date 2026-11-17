@@ -2,6 +2,7 @@
 
 > **Propósito**: qué aporta el paquete `MotorDsl.Maui` sobre el núcleo — controles bindeables,
 > los tres renderers que necesitan gráficos, y el reporte de diagnóstico.
+> **Versión**: 3.0 — commit `0f8413d` (main, 2026-09-24); base anterior `e688f3c`. Rutas relativas a la raíz del repo de código.
 > **Fuentes primarias**: `src/MotorDsl.Maui/`,
 > `docs/10_developer_guide/componentes-ux-maui.md`, `…/render-pixelado-y-pdf.md`, `…/diagnostics.md`.
 
@@ -72,6 +73,15 @@ Lo que lo distingue del renderer base es el manejo de fallas por severidad, intr
 |---|---|
 | La imagen **no se puede rasterizar** | `Error` con el mensaje del rasterizador y el `source` recortado a 40 caracteres; `Output` vacío; **aborta el ticket** |
 | La imagen rasteriza **toda en blanco** | `Warning` («posible placeholder transparente»); el ticket se imprime igual |
+
+**Cola del ticket (cambio de `01a4151`)**: el renderer ya no cierra siempre con `CutFull`; emite
+`EscPosCommands.EndOfTicket(profile.GetCapability("end_of_ticket") as string, end_feed_lines ?? 4)`
+(`src/MotorDsl.Maui/Renderers/BitmapEscPosRenderer.cs` l. 116–119), igual que `EscPosRenderer`.
+Default `cut_partial`; valores `cut_full`, `feed`, `none` (`src/MotorDsl.Rendering/EscPosCommands.cs`
+l. 42–63). Semántica de los modos, capabilities del perfil y la confirmación de impresión
+(`PrintNotConfirmedException`): ver [`03_renderizado-base.md`](03_renderizado-base.md) y
+[`04_impresion-transports.md`](04_impresion-transports.md). A diferencia de `PdfRenderer`, este
+renderer sí emite EAN-13 nativo (`EmitBarcodeEan13`, llamada l. 98, definición l. 167).
 
 El recorte del `source` en los mensajes evita volcar un base64 entero al log. El renderer base, en
 cambio, degrada en silencio a un `[BITMAP]` textual (ver [`03_renderizado-base.md`](03_renderizado-base.md)).
@@ -153,7 +163,7 @@ Un `DiagnosticsReport` agrupa `LibraryInfo[]`, `AppInfoSnapshot`, `DeviceInfoSna
 `DiagnosticsBuilder.MaskMac`: una MAC válida queda como `AA:BB:CC**:**:**`; cualquier otro id se
 recorta a sus primeros 4 caracteres más `...`. El enmascarado se aplica también a los
 `PrintFailureEntry` del historial. Los helpers de `DiagnosticsBuilder` están en
-`MotorDsl.Printing.Abstractions` —no en MAUI— y se cubren con tests (`DiagnosticsBuilderTests`).
+`MotorDsl.Printing.Abstractions` —no en MAUI— y se cubren con tests (`src/MotorDsl.Tests/DiagnosticsBuilderTests.cs`).
 
 Patrón de UI de los tres botones (ver en pantalla / imprimir / compartir por Share API):
 `docs/10_developer_guide/diagnostics.md`.
@@ -168,3 +178,17 @@ Patrón de UI de los tres botones (ver en pantalla / imprimir / compartir por Sh
   empaqueta en `macos-15` (ver [`08_build-devops.md`](08_build-devops.md)).
 - Tiene **una sola** directiva de compilación condicional en todo el proyecto — es lo que hace que
   el motor funcione en iOS y que el problema de iOS fuera solo el transport (ADR-0005).
+
+---
+
+## 7. Cambios en `e688f3c..0f8413d` que tocan este dominio
+
+| Commit | Archivo de `src/MotorDsl.Maui/` | Efecto |
+|---|---|---|
+| `01a4151` | `Renderers/BitmapEscPosRenderer.cs` (+6/−1) | cola del ticket configurable por perfil (§3) |
+
+El resto del rango (transport Bluetooth, `PrintNotConfirmedException`, samples, `scripts/local-devcontainer/`)
+no modifica `src/MotorDsl.Maui/` (`git diff --stat e688f3c..0f8413d`). Controles, `PdfRenderer`,
+`RasterPreviewRenderer`, rasterizadores y diagnóstico quedan sin cambios. Conteos de líneas de este
+índice son estáticos (`wc -l`); no se compiló ni se ejecutaron tests (sin SDK .NET en el host).
+

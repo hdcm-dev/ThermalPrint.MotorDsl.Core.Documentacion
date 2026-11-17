@@ -20,7 +20,7 @@
 
 | Necesitás saber… | Leé este índice |
 |---|---|
-| Qué es el proyecto, qué stack usa, cómo se reparten los 8 paquetes, qué decisiones lo condicionan | [`00_MASTER-INDEX.md`](indexes/00_MASTER-INDEX.md) |
+| Qué es el proyecto, qué stack usa, cómo se reparten los 8 paquetes, qué decisiones lo condicionan, historial de versiones | [`00_MASTER-INDEX.md`](indexes/00_MASTER-INDEX.md) |
 | Cómo corre el pipeline (parse → evaluar → layout → render), qué contratos existen, cómo se arma el motor por DI | [`01_nucleo-pipeline.md`](indexes/01_nucleo-pipeline.md) |
 | Cómo se escribe una plantilla DSL, qué nodos hay, `template` vs `integrated`, cómo se resuelven bindings y condiciones | [`02_dsl-y-modelos.md`](indexes/02_dsl-y-modelos.md) |
 | Qué renderers existen, qué `Target` usa cada uno, qué bytes ESC/POS se emiten, cómo agregar un renderer propio | [`03_renderizado-base.md`](indexes/03_renderizado-base.md) |
@@ -37,13 +37,14 @@
 
 | Dato | Valor |
 |---|---|
-| Proyecto | **MotorDsl** — repositorio `PrintThermal_Motor_Maui` |
-| Tipo | Librería .NET distribuida como **8 paquetes NuGet**. No es una app ni un servicio |
-| Stack | .NET 10 · C# · `net10.0` puro en 6 paquetes; `net10.0-android` + `net10.0-ios` en 2 |
-| Repo | `https://github.com/Aplicada-Streaming/PrintThermal_Motor_Maui` · licencia MIT |
+| Proyecto | **MotorDsl** — repositorio `PrintThermal_Motor_Maui` (`README.md`) |
+| Tipo | Librería .NET distribuida como **8 paquetes NuGet**. No es una app ni un servicio (`PrintThermalDriver.slnx`, `src/*/*.csproj`) |
+| Stack | .NET 10 · C# · `net10.0` puro en 6 paquetes; `net10.0-android;net10.0-ios` en 2 (`MotorDsl.Bluetooth`, `MotorDsl.Maui`) · tests xUnit 2.9.3 (`src/*/*.csproj`) |
+| Repo | `https://github.com/Aplicada-Streaming/PrintThermal_Motor_Maui` · licencia MIT (`PackageLicenseExpression` en los `.csproj`) |
 | Solución | `PrintThermalDriver.slnx` (formato slnx: 9 proyectos en `src/` + 5 samples) |
-| Versión publicada | `1.0.13` (2026-07-13). El octavo paquete `MotorDsl.Network` está en `[Unreleased]` |
-| Dependencias externas | SkiaSharp 3.119.2, PdfSharpCore 1.3.67, QRCoder 1.8.0 (solo `MotorDsl.Maui`); `Microsoft.Extensions.DependencyInjection.Abstractions` 10.0.8 |
+| Versión publicada | `1.0.17` (2026-08-27), última entrada fechada de `CHANGELOG.md`; `[Unreleased]` solo agrega `scripts/local-devcontainer/`. La versión no vive en los `.csproj`: se inyecta en pack con `-p:PackageVersion` / `-p:MotorDslVersion` |
+| Dependencias externas | SkiaSharp.Views.Maui.Controls 3.119.2, PdfSharpCore 1.3.67, QRCoder 1.8.0 (solo `MotorDsl.Maui`); `Microsoft.Extensions.DependencyInjection(.Abstractions)` 10.0.8 |
+| Tests | `src/MotorDsl.Tests/`: 37 archivos `.cs`, 292 métodos (281 `[Fact]` + 11 `[Theory]`) — **conteo estático**, sin corrida (ver `07_tests`) |
 
 **Función principal**: convierte un documento descrito en un **DSL JSON** en la salida concreta
 que consume un dispositivo —texto plano, bytes ESC/POS, PDF o un raster de vista previa— y lo
@@ -78,11 +79,11 @@ PrintThermal_Motor_Maui/
 │   ├── MotorDsl.Network/                 Transport TCP 9100 — net10.0 puro (habilita iOS)
 │   ├── MotorDsl.Bluetooth/               Transport BT Classic SPP — solo Android
 │   ├── MotorDsl.Maui/                    Controles MAUI, renderers PDF/bitmap/preview, diagnóstico
-│   └── MotorDsl.Tests/                   xUnit — 285 métodos de prueba
+│   └── MotorDsl.Tests/                   xUnit — 292 métodos (conteo estático)
 ├── samples/                              5 apps MAUI de demostración
 ├── docs/                                 Documentación funcional y técnica previa (12 carpetas)
-├── scripts/{local,mobile,nuget}/         Build local, publicación APK, publicación NuGet
-├── .github/workflows/                    ci.yml + 5 workflows de CD
+├── scripts/{local,local-devcontainer,mobile,nuget}/  Build local (Windows y Docker en Linux), APK, NuGet
+├── .github/workflows/                    ci.yml + 6 workflows de CD (7 en total)
 └── .devcontainer/                        Contenedor .NET 10 para desarrollar en Linux
 ```
 
@@ -95,8 +96,9 @@ PrintThermal_Motor_Maui/
   `/Libs/NugetOrg/PrintThermal_Motor_Maui.Documentacion`. Son dos repositorios git distintos.
 - **Los índices son un destilado, no la fuente.** Si vas a modificar código, abrí el archivo citado.
   Ninguna afirmación de esta base autoriza a editar sin leer.
-- **No inventes versiones ni fechas.** Lo publicado es `1.0.13`; `MotorDsl.Network` todavía no salió
-  a nuget.org y por eso los samples «Nuget» apuntan a `ProjectReference` (ver `06_samples`).
+- **No inventes versiones ni fechas.** La última versión registrada en `CHANGELOG.md` es `1.0.17`
+  (2026-08-27); `MotorDsl.Network` es paquete desde `1.0.15`. 1.0.17 es **cambio de comportamiento**
+  (cola `GS V 1`, barrera `GS I 67` en BT): ver `00_MASTER-INDEX` §7 antes de razonar sobre la salida.
 - **No supongas que hay build en esta máquina.** No hay SDK .NET instalado en el host: los TFM
   `net10.0` se compilan en el devcontainer, `net10.0-android` en el runner self-hosted y
   `net10.0-ios` solo en macOS.
@@ -114,15 +116,18 @@ PrintThermal_Motor_Maui/
 - Destino      : `/Libs/NugetOrg/PrintThermal_Motor_Maui.Documentacion/ia-db` (indicado en la invocación)
 - Fuentes      : `src/`, `samples/`, `docs/`, `scripts/`, `.github/workflows/`, `.devcontainer/`, `README.md`, `CHANGELOG.md`, `PrintThermalDriver.slnx`
 - Exclusiones  : `.git`, `.vs`, `.vscode`, `bin`, `obj`, `nupkg`, binarios (`.ttf`, `.bmp`, `.svg`, `.base64`) y lo ignorado por el `.gitignore` del proyecto
-- Estado fuente: rama `main` · commit `e688f3c` · última versión publicada `1.0.13`
-- Generado     : 2026-09-02 · Versión: 2.0 (regeneración completa desde cero)
+- Estado fuente: rama `main` · commit `0f8413d` (2026-09-24) · última versión publicada `1.0.17` según `CHANGELOG.md` (los `.csproj` no fijan versión)
+- Base previa  : `e688f3c` (ia-db v2.0, 2026-09-02); el delta `e688f3c..0f8413d` se re-verificó contra el código
+- Generado     : 2026-11-17 · Versión: 3.0 (regeneración completa desde cero)
 - Actualizar   : `/IA/PROMPTs/IA.Prompts/Tool-Prompts/Indexado-Documentado/Actualizar-Indexado.md`
 
-**Trabajo sin commitear no indexado**: al momento de generar, el repositorio tenía tres archivos
-modificados en `samples/MotorDsl.MultaApp/` (`Pages/MainPage.xaml`, `Pages/MainPage.xaml.cs`,
-`Templates/MultaDsl.cs`). Se indexó el contenido **commiteado** en `e688f3c`; esos cambios locales
-quedan fuera.
+**Árbol de trabajo limpio**: al generar, `git status` del repositorio de código estaba vacío; todo
+lo indexado es contenido commiteado en `0f8413d`. Sin SDK .NET en el host: ninguna afirmación de
+esta base dice que el código compile o que los tests pasen.
 
-**Nomenclatura de índices**: los nombres `01_nucleo-pipeline` … `09_docs-existentes` provienen del
-campo `ia_db_index` de `PrintThermal_Motor_Maui-docs/docs-manifest.yaml`, en este mismo repositorio
-de documentación. Se respetan para mantener la trazabilidad manifiesto ↔ ia-db.
+**Nomenclatura de índices**: los nombres `01_nucleo-pipeline` … `07_tests` provienen del campo
+`ia_db_index` de `PrintThermal_Motor_Maui-docs/docs-manifest.yaml`, en este mismo repositorio de
+documentación (verificado 2026-11-17: los paquetes, los samples y `MotorDsl.Tests` declaran ahí su
+índice). `00_MASTER-INDEX`, `08_build-devops` y `09_docs-existentes` no figuran en el manifest: los
+agrega esta ia-db siguiendo la misma convención. Se respetan los nombres para mantener la
+trazabilidad manifiesto ↔ ia-db.

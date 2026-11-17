@@ -5,6 +5,8 @@
 > **Fuentes primarias**: `src/MotorDsl.Core/Contracts/`, `src/MotorDsl.Core/Engine/DocumentEngine.cs`,
 > `src/MotorDsl.Core/Layout/LayoutEngine.cs`, `src/MotorDsl.Core/Validation/`,
 > `src/MotorDsl.Extensions/`.
+> **Versión**: 3.0 — verificado contra `main` @ `0f8413d` (2026-09-24); base previa `e688f3c`.
+> Sin SDK .NET en el host: nada aquí afirma que compile o que los tests pasen.
 
 ---
 
@@ -141,10 +143,16 @@ Capacidades que el código sí lee, con su consumidor:
 | Clave | Tipo | Leída en |
 |---|---|---|
 | `supports_qrcode`, `supports_barcode`, `supports_images` | `bool` | `LayoutEngine` (degradación) |
-| `bitmap_max_width_px` | `int` (default 384) | `EscPosRenderer`, `BitmapEscPosRenderer` |
+| `bitmap_max_width_px` | `int` (default 384) | `EscPosRenderer`, `BitmapEscPosRenderer`, `RasterPreviewRenderer` |
+| `end_of_ticket` | `"cut_partial"` (default) \| `"cut_full"` \| `"feed"` \| `"none"` | `EscPosRenderer`, `BitmapEscPosRenderer` → `EscPosCommands.EndOfTicket` (nuevo en `01a4151`; detalle en 03) |
+| `end_feed_lines` | `int` (default 4) | idem, solo con `end_of_ticket = "feed"` |
 | `nv_logo_keycode` | `int` | `EscPosRenderer` (ruteo a recall NV) |
 | `nv_logo_kind` | `"gsl"` \| `"fs"` | `EscPosRenderer` (qué familia de comando emitir) |
 | `codepage` | `"437"` \| `"850"` | `EscPosRenderer.GetEncoding` (solo QR y barcode) |
+
+Fuentes: `src/MotorDsl.Rendering/EscPosRenderer.cs` (líneas 76–238), `src/MotorDsl.Maui/Renderers/BitmapEscPosRenderer.cs`,
+`src/MotorDsl.Maui/Renderers/RasterPreviewRenderer.cs`. Valores no reconocidos de `end_of_ticket` caen al
+default (`src/MotorDsl.Rendering/EscPosCommands.cs`); `ProfileValidator` no los valida.
 
 `ProfileValidator` exige lo mínimo: `Name` no vacío, `Width > 0`, `RenderTarget` no vacío.
 
@@ -183,6 +191,15 @@ en memoria y los registran ya poblados
 | `RenderResult` | `Target`, `Output?` (`string` o `byte[]`), `Warnings`, `Errors` | `IsSuccessful => Errors.Count == 0`; helpers `ToHexString()` y `ToBase64()` devuelven `null` si `Output` no es `byte[]` |
 | `LayoutInfo` | `LineNumber`, `ColumnNumber`, `Width`, `Height`, `Alignment`, `IsWrapped`, `WrappedText`, `IsTruncated`, `DeviceMetadata` | `IsTruncated` se declara pero el `LayoutEngine` nunca lo pone en `true` |
 
+### Modelo de error de impresión que vive en Core
+
+`src/MotorDsl.Core/Models/PrintError.cs` define `PrintError.FromException`, que clasifica la excepción en un
+`PrintErrorType`. Nuevo desde `01a4151`: `PrintNotConfirmedException`
+(`src/MotorDsl.Core/Models/PrintNotConfirmedException.cs`) — el envío terminó pero la impresora no confirmó
+haber impreso — se mapea a `PrintErrorType.Protocol`, que según su comentario XML el handler por defecto
+**no** reintenta (reimprimir es decisión del operador). Quién la lanza y la política de reintentos:
+`04_impresion-transports.md`.
+
 ---
 
 ## 8. Puntos de atención
@@ -195,9 +212,12 @@ en memoria y los registran ya poblados
 - **`Evaluator` tiene sobrecargas privadas muertas**: varias versiones sin el parámetro `warnings`
   (`EvaluateNode`, `EvaluateTextNode`, `EvaluateConditionalNode`, `EvaluateLoopNode`,
   `EvaluateContainerNode`) no las llama nadie dentro de la clase.
+- **Pipeline sin cambios en `e688f3c..0f8413d`**: de Core/Extensions solo cambiaron `Models/PrintError.cs` y
+  `Models/PrintNotConfirmedException.cs` (`git diff --stat e688f3c..0f8413d`); contratos, `DocumentEngine`,
+  `LayoutEngine` y DI quedan como en la versión anterior (re-verificados: 15 contratos, 257 y 337 líneas).
 - **`EvaluateTemplate` es API pública fuera del contrato**: `Evaluator` la expone pero `IEvaluator`
   no la declara, así que se pierde al inyectar por la interfaz.
 
 Ver también: [`02_dsl-y-modelos.md`](02_dsl-y-modelos.md) para el AST y la gramática,
 [`03_renderizado-base.md`](03_renderizado-base.md) para lo que hace cada renderer con el
-`NodeLayoutInfo`.
+`NodeLayoutInfo`, [`04_impresion-transports.md`](04_impresion-transports.md) para el uso de `PrintError`.
