@@ -101,8 +101,8 @@
   efímero con `maui-android` (`CHANGELOG.md:15-29`) — vía candidata para compilar sin tocar el host.
 - `.github/workflows/cd-nuget.yml`:
   - Disparo: tags `v*`, push a `main`, `workflow_dispatch` con `version` (:12-20). `DOTNET_VERSION: 10.0.102` (:23).
-  - Job `version` en `[self-hosted, i7infra-dev]` (:31): tag→versión, dispatch→input, si no `0.0.0-preview.N` (:38-45).
-  - `pack-managed` en `[self-hosted, i7infra-dev]` (:53): restore/build/pack de
+  - Job `version` en `[self-hosted, <equipo-1>-dev]` (:31): tag→versión, dispatch→input, si no `0.0.0-preview.N` (:38-45).
+  - `pack-managed` en `[self-hosted, <equipo-1>-dev]` (:53): restore/build/pack de
     `Core Parser Rendering Extensions Printing.Abstractions Network` (:70,:76,:87) y `dotnet test` (:80-83).
   - `pack-platform` en `macos-15` (:108): `dotnet workload install ios android maui-android` (:124), build/pack de
     `Bluetooth Maui` (:128,:134,:140). Motivo: el workload `ios` no existe en Linux (:5-10).
@@ -112,7 +112,7 @@
     Core (`MotorDsl.Printing.Abstractions.csproj:23`); nuget.org no valida dependencias al subir, así que no rompe
     (**Inferido**).
   - Un 9.º paquete (p. ej. `MotorDsl.Pax`, sólo `net10.0-android`) obliga a: agregarlo a un job de pack (macOS, o
-    Linux si el runner tuviera `android` — **no verificado** en `i7infra-dev`), subir el conteo a 9 (:184-185) y
+    Linux si el runner tuviera `android` — **no verificado** en `<equipo-1>-dev`), subir el conteo a 9 (:184-185) y
     agregarlo a la lista de push (:193). Si el binding de NeptuneLite fuera un proyecto aparte empaquetado, serían 10.
 - `CHANGELOG.md`: Keep a Changelog + SemVer, versión inyectada por `-p:PackageVersion` y no en los `.csproj` (:5-9);
   `[Unreleased]` (:11) sólo con `scripts/local-devcontainer/`; última versión `1.0.17` (2026-08-27) (:31).
@@ -133,4 +133,4 @@ más transportes no-ESC/POS. Una variante de (a) sin ambigüedad sería un rende
 ## 9. Pendientes para otras líneas
 - Ancho de cabezal del A910S y API real de NeptuneLite (`print(Bitmap, listener)`, `getStatus`): relevar del material
   PAX (R de SDK), no de esta librería.
-- Estado de workloads en el runner `i7infra-dev`: no verificado.
+- Estado de workloads en el runner `<equipo-1>-dev`: no verificado.

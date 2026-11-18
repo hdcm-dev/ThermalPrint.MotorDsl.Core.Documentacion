@@ -13,7 +13,7 @@ Trazabilidad: T5, D1, D2, D3, D4. Depende de: N01-N05.
   4. GMS/GPS: `pm list packages | grep -i gms`; prueba de coordenadas.
   5. Ticket de calibración (regla 576 px) → ancho real.
   6. Acta real vs PNG del simulador; estados reales (sin papel, tapa, calor); tiempo de impresión; diálogo del permiso PRINTER; botón Atrás.
-  7. Release con ProGuard/R8 y firma PAX (Leandro): `DALProxy` carga; código 103 whitelist; `dumpsys package com.gdi.coredesa.inspector | grep -i extractNativeLibs` y `run-as … ls` del `nativeLibraryDir` con `libDeviceConfig.so` presente [Verificacion-3 H3].
+  7. Release con ProGuard/R8 y firma PAX (`<firmante-PAX>`): `DALProxy` carga; código 103 whitelist; `dumpsys package com.<org>.coredesa.inspector | grep -i extractNativeLibs` y `run-as … ls` del `nativeLibraryDir` con `libDeviceConfig.so` presente [Verificacion-3 H3].
 
 ## Criterios (CA1..CA8 de informe-qa, consolidados)
 CA1 tests verdes; CA2 todos los códigos mapeados; CA3 simulador cubre estados; CA4 emulador sin crash; CA5 sin regresión BT; CA6 WebView ≥119 o riesgo aceptado por escrito por el PO; CA7 acta real legible al ancho medido; CA8 Release firmado imprime.

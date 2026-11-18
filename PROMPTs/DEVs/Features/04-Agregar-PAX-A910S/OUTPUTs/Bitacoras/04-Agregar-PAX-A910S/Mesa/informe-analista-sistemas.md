@@ -37,7 +37,7 @@ Con dispositivo: ancho real px y dpi (R3 §12; 384 es **Inferido**), paquete/ver
 - Ancho desconocido: el perfil queda parametrizable; se mide con una regla impresa (el sobrante se recorta, R3 §12).
 - WebView < 94 en el A910S invalida el inspector web aunque imprima (R4 §3).
 - Binding: reflexión de `DALProxy` + R8 puede romper en Release sin ProGuard (R3 §5).
-- `pack-platform` corre en macos-15; el runner `i7infra-dev` no verificado con workload android (R1 §16, §26).
+- `pack-platform` corre en macos-15; el runner `<equipo-1>-dev` no verificado con workload android (R1 §16, §26).
 
 ## 4. Reglas de entrega
-Librería: rama propia + PR. App: rama desde `main` (único remoto, R2 §1) + PR. Web: sin cambios; si se ajusta el texto de `ImpresoraTunnel.razor:109`, desde `origin/Homologacion` (c89f8588), sólo commit y push (R5 §5-7). Infraestructura (USB a windows-i7infra, regla udev PAX en hpdev) sólo con autorización del PO (R4 §12-16).
+Librería: rama propia + PR. App: rama desde `main` (único remoto, R2 §1) + PR. Web: sin cambios; si se ajusta el texto de `ImpresoraTunnel.razor:109`, desde `origin/Homologacion` (c89f8588), sólo commit y push (R5 §5-7). Infraestructura (USB a `windows-<equipo-1>`, regla udev PAX en `<equipo-2>`) sólo con autorización del PO (R4 §12-16).

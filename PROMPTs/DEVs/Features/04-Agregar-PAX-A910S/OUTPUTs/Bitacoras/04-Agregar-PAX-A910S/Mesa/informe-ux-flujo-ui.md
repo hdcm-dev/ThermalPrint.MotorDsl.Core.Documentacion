@@ -1,6 +1,6 @@
 # Informe de la comisión UX, flujo de usuario e UI (feature 04, PAX A910S)
 
-Las rutas de la app son relativas a `Ng/Ng-Core/GDA.APP/GDA.Core.APP/`.
+Las rutas de la app son relativas a `<app>/`.
 
 ## 1. Estado actual: lo que el inspector ve hoy
 

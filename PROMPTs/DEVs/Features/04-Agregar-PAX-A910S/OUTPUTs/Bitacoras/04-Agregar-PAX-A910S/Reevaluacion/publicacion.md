@@ -103,7 +103,7 @@ Corrida 44204636651 de `CI - Tests` en #13:
   - Requiere renovar `NUGET_API_KEY` (sólo el PO, en su cuenta de nuget.org, con permiso para ID nuevos `MotorDsl.*`) y crear el tag.
   - Publica, de forma inmutable, un paquete que en el equipo real responde `Connection`, y no aporta nada a la app.
 - **S3. Canal privado para el paquete con binding.**
-  - Publicar MotorDsl.* en el feed privado de GitHub Packages de la organización de la app. La app ya lo consume con `NUGET_TOKEN` para NgPushDispatch.Maui (`verificar-pr.yml:126-139`).
+  - Publicar MotorDsl.* en el feed privado de GitHub Packages de la organización de la app. La app ya lo consume con `NUGET_TOKEN` para `<servicio-privado>.Maui` (`verificar-pr.yml:126-139`).
   - Resuelve que el build PAX dependa del feed local y que el material PAX se redistribuya en público.
   - Requiere un workflow nuevo con el SDK PAX como secreto o artefacto privado (la opción que dejó abierta U2 §bloqueo 1) y una decisión sobre la licencia. Conviene hacerlo **después** de validar en el equipo.
 - **S4. Cerrar los huecos de U3 en un PR chico de la librería, sin publicar.** Agregar `MotorDsl.Pax` a `tag-next-version.sh` y a `publish-motordsl-nuget.bat`, y anotar en `docs/09_devops` y en el CHANGELOG que el paquete público sale sin binding. Va aparte de S1 y es delegable.

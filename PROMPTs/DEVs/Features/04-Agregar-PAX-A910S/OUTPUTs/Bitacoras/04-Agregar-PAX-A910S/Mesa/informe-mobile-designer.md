@@ -1,6 +1,6 @@
 # Informe de la mesa: diseño de app móvil MAUI (feature 04, PAX A910S)
 
-Rutas de la app relativas a `Ng/Ng-Core/GDA.APP/GDA.Core.APP/GDA.Core.APP/`.
+Rutas de la app relativas a `<app>/<app>/`.
 
 ## Evidencia de partida (verificada en esta sesión)
 - `Services/Printing/IPrinterService.cs:11-40`: la interfaz ya es casi agnóstica (Discover, GetDefaultIfPresent, Connect, Send(byte[]), SaveDefault, alias). Lo único atado a Bluetooth es `EnsurePermissionsAsync()` que devuelve `BluetoothPermissionResult` (`:16`) y el comentario de `IsSupported` (`:13`).

@@ -81,6 +81,21 @@ generados conforme al Marco de Documentación de Software.
   recomendación es un paquete `MotorDsl.Network` con TFM `net10.0` puro. No se modificó código.
 - Carpeta `PROMPTs/` para el material de generación documental.
 
+### Seguridad
+
+- **Datos privados fuera de la punta pública** (2026-11-18): en las bitácoras, núcleos,
+  expedientes y relevamientos de `PROMPTs/DEVs/Features/04-Agregar-PAX-A910S/OUTPUTs/` y en
+  `reporte-derivas.md`, los nombres de la app consumidora y de su sistema web, la organización, los
+  repositorios privados, los clientes, los servicios privados, los equipos, las IP, las rutas
+  locales, la serie del dispositivo y los nombres de terceros pasan a marcadores (`<app>`,
+  `<app-web>`, `<org>`, `<repo>`, `<cliente>`, `<servicio-privado>`, `<equipo-N>`, `<ip-tailnet>`,
+  `<ip-privada>`, `<host-publico>`, `<serie-del-g42>`, `<workspace>`, `{raíz-de-worktrees}`,
+  `{dir-de-trabajo}`, `{tmp-de-sesiones}`). Tres archivos cambian de nombre por el mismo motivo
+  (`Fix08-App-Web.md`, `App-menu-bundles-y-PRs-60-62.md` y `Nucleos/04-Web-App.md`), y dos
+  capturas de `Implementacion/Images/` tapan el nombre de la organización. Sólo cambia la punta:
+  la historia no se reescribe. Queda sin tocar `PROMPTs/Features/03-Extender-A-IOs/Crear-Extender-A-IOs.md`,
+  que es un prompt del PO.
+
 ## [1.0.0] - 2026-07-15
 
 Primera generación completa del conjunto documental por ingeniería inversa sobre el código en

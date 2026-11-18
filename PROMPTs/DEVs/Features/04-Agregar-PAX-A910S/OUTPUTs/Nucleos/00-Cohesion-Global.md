@@ -5,9 +5,9 @@
 |---|---|---|
 | 01 | [Binding, transporte `pax`, vía bitmap](01-Transporte-Binding-Via-Bitmap.md) | Librería |
 | 02 | [Perfil PAX e impresora simulada](02-Perfil-E-Impresora-Simulada.md) | Librería |
-| 03 | [App inspector](03-App-Inspector.md) | GDA.Core.APP |
-| 04 | [Web GDA.Core](04-Web-GDA-Core.md) | GDA.Core (sin cambios) |
-| 05 | [Conexión física, escenas, conocimientos](05-Infra-Conexion-Fisica-Y-Escenas.md) | Ng.IA-Context.Scene / hpdev |
+| 03 | [App inspector](03-App-Inspector.md) | `<app>` |
+| 04 | [Web `<app-web>`](04-Web-App.md) | `<app-web>` (sin cambios) |
+| 05 | [Conexión física, escenas, conocimientos](05-Infra-Conexion-Fisica-Y-Escenas.md) | `<repo>` / `<equipo-2>` |
 | 06 | [QA y checklist del equipo](06-QA-Y-Checklist-Equipo.md) | transversal |
 | 07 | [CI, NuGet, entrega](07-CI-NuGet-Entrega.md) | Librería |
 
@@ -29,7 +29,7 @@ Contratos entre núcleos: Kind `"pax"`; target `raster-preview` + `bitmap_max_wi
 | Target | pos-pax: `raster-pax`; resto: `raster-preview` | `raster-preview` |
 | Selección de transporte | ux: runtime; resto: por trío | por trío (lo exige el prompt) vía interruptor de build |
 | Runner de pack | plan T6: Linux | macos-15 `pack-platform` |
-| Fuente GDA.Core | memoria: Issue699; prompt: Homologacion | Homologacion; clon Issue699 inexistente |
+| Fuente `<app-web>` | memoria: Issue699; prompt: Homologacion | Homologacion; clon Issue699 inexistente |
 
 ## Trazabilidad T/D → núcleos
 | Tarea | Núcleo | Unidad (Plan) |
@@ -49,4 +49,4 @@ Contratos entre núcleos: Kind `"pax"`; target `raster-preview` + `bitmap_max_wi
 | D1 relevar equipo | 05, 06 | D-fase |
 | D2 acta real | 01, 06 | D-fase |
 | D3 completar Knowledge-Test PayDroid con la corrida real (borrador 0.1 creado en U7) | 05, 06 | D-fase |
-| D4 firma Leandro | 06, 07 | D-fase |
+| D4 firma `<firmante-PAX>` | 06, 07 | D-fase |

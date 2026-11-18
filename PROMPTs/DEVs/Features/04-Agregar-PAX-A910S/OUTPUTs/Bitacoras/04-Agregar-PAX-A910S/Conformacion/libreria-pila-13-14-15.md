@@ -17,7 +17,7 @@ No estaba asentada en el repo de la librería (sí en `PrintThermal_Motor_Maui.D
 | 3 | Build + tests locales sobre `0b86cbe` | dotnet 10.0.403, `MotorDsl.Tests` 364/364 en éxito |
 | 4 | #15 → `feature/04-pax-binding` | informe pre-merge https://github.com/hdcm-dev/ThermalPrint.MotorDsl.Core/pull/15#issuecomment-6964699204 · guarda: open, head=`0b86cbe`, mergeable=true, clean, runs=0 · **fusionado por el agente**, merge `ae60e35` · rama `feature/04-pax-ci` 404 |
 | 5 | #14 → `feature/04-pax-transporte` | informe https://github.com/hdcm-dev/ThermalPrint.MotorDsl.Core/pull/14#issuecomment-6964707810 · head=`ae60e35` (árbol idéntico a `0b86cbe`), clean, runs=0 · **fusionado por el agente**, merge `1eb9000` · rama `feature/04-pax-binding` 404 |
-| 6 | Local | worktrees `/vm/wt/PrintThermal-pax-u2` y `-u3` retirados, ramas locales borradas; `0b86cbe` y `e15bc97` alcanzables desde `origin/feature/04-pax-transporte` |
+| 6 | Local | worktrees `{raíz-de-worktrees}/PrintThermal-pax-u2` y `-u3` retirados, ramas locales borradas; `0b86cbe` y `e15bc97` alcanzables desde `origin/feature/04-pax-transporte` |
 | 7 | #13 → `main` | cabeza `1eb9000`; CI `CI - Tests` run 44204636651 (`pull_request`) **en cola**: job pide `[self-hosted, ci-hdcm]` y ningún runner lo tomó en ~4 min; `mergeable_state=unstable` mientras tanto. **No fusionado** |
 
 **Apartamiento declarado de G3 en #15 y #14:** el conocimiento pide al menos una corrida para la cabeza («ninguna: reserva»). `ci.yml` sólo corre en `pull_request` a `main`; por instrucción del pedido, G3 de esas bases intermedias se apoyó en los tests locales registrados y en la CI de #13, que es la que entra a `main`. Ese merge no tocó `main` (efecto acotado a ramas de la pila).
