@@ -1,4 +1,4 @@
-# R5-web — Relevamiento de la parte web (GDA.Core / InspectoresApp.v2)
+# R5-web — Relevamiento de la parte web (`<app-web>` / InspectoresApp.v2)
 
 Fecha: 2026-11-17. Fase de sólo lectura: no se modificó código ni se hizo commit. Se ejecutó `git ls-remote` (lectura) y no `git fetch`.
 
@@ -6,19 +6,19 @@ Fecha: 2026-11-17. Fase de sólo lectura: no se modificó código ni se hizo com
 
 | Afirmación | Evidencia |
 |---|---|
-| `Ng/Ng-Core/GDA/Issue699-GDA.Core` **no existe** en disco. | `cd .../GDA/Issue699-GDA.Core` → "No existe el fichero o el directorio"; `ls Ng/Ng-Core/GDA/` → `GDA.Core  GDA.Core.Documentacion  GDA.Core-i7infra-devcontainer`; `find Ng -maxdepth 4 -iname '*699*' -type d` → sin resultados. |
-| Hay un único repo local `GDA/GDA.Core` con worktrees (`GDA.Core-i7infra-devcontainer` en `i7infra-devcontainer` d53bd23b; otro en scratchpad `wt-pf-c4` f48c3eda). | `git worktree list` |
-| Remoto: `https://github.com/Notions-Group-SA/GDA.Core.git`. | `git remote -v` |
-| Rama actual de `GDA/GDA.Core`: `fix08-blazor-web-compat-webview-postnet` (6970c6b3, 2026-11-12). | `git branch --show-current`; `git log -1` |
+| `Issue699-<app-web>` **no existe** en disco. | `cd .../Issue699-<app-web>` → "No existe el fichero o el directorio"; `ls <app-web>/` → `<app-web>  <app-web>.Documentacion  <app-web>-<equipo-1>-devcontainer`; `find Ng -maxdepth 4 -iname '*699*' -type d` → sin resultados. |
+| Hay un único repo local `<app-web>/<app-web>` con worktrees (`<app-web>-<equipo-1>-devcontainer` en `<equipo-1>-devcontainer` d53bd23b; otro en scratchpad `wt-pf-c4` f48c3eda). | `git worktree list` |
+| Remoto: `<org>/<app-web>`. | `git remote -v` |
+| Rama actual de `<app-web>/<app-web>`: `fix08-blazor-web-compat-webview-postnet` (6970c6b3, 2026-11-12). | `git branch --show-current`; `git log -1` |
 | `origin/HEAD -> origin/Homologacion`; existe además `origin/Issue-699-FF-Escenario-Homologacion` (2a17f245) y `master` (7a636609). | `git branch -a`; `git ls-remote --heads origin` |
 | **Homologacion remota = c89f8588** (Merge PR #1022, 2026-11-17), coincide con el commit citado por el plan. La ref de seguimiento local `origin/Homologacion` ya está en c89f8588. | `git ls-remote` → `c89f85885b29... refs/heads/Homologacion`; `git rev-parse origin/Homologacion` |
 | La rama local `Homologacion` está **atrasada**: 49a1427e (Merge PR #997, 2026-11-10). | `git rev-parse Homologacion` |
 
-**Resolución:** el prompt (GDA/GDA.Core, rama Homologacion) es correcto en cuanto a repo; la "fuente Issue699" de la memoria corresponde hoy a la rama remota `Issue-699-FF-Escenario-Homologacion` del mismo remoto, no a un clon separado (el clon `Issue699-GDA.Core` no está en disco). La referencia al día es `origin/Homologacion` (c89f8588); la rama local `Homologacion` no lo está. Todas las lecturas de código de abajo se hicieron sobre `origin/Homologacion` vía `git show`/`git grep`. **Inferido:** el clon Issue699 fue eliminado o renombrado; la memoria quedó desactualizada.
+**Resolución:** el prompt (`<app-web>/<app-web>`, rama Homologacion) es correcto en cuanto a repo; la "fuente Issue699" de la memoria corresponde hoy a la rama remota `Issue-699-FF-Escenario-Homologacion` del mismo remoto, no a un clon separado (el clon `Issue699-<app-web>` no está en disco). La referencia al día es `origin/Homologacion` (c89f8588); la rama local `Homologacion` no lo está. Todas las lecturas de código de abajo se hicieron sobre `origin/Homologacion` vía `git show`/`git grep`. **Inferido:** el clon Issue699 fue eliminado o renombrado; la memoria quedó desactualizada.
 
 ## 2. ImpresoraTunnel.razor
 
-Ruta: `GDA.Core.InspectoresApp.v2/Components/Pages/Impresora/ImpresoraTunnel.razor` (121 líneas; sin diferencias entre HEAD y origin/Homologacion; último commit que lo toca 421d90e9 "fix: Agregado proyecto v2").
+Ruta: `<app-web>.InspectoresApp.v2/Components/Pages/Impresora/ImpresoraTunnel.razor` (121 líneas; sin diferencias entre HEAD y origin/Homologacion; último commit que lo toca 421d90e9 "fix: Agregado proyecto v2").
 
 - Es una página `@page "/ImpresoraTunnel"` (línea 1) **puramente estática**: CSS (3-82) y un mensaje de error (84-122).
 - No tiene `@code`, no inyecta `IJSRuntime`, no usa `postMessage`, ni JS interop, ni esquema de URL propio.
@@ -29,9 +29,9 @@ Ruta: `GDA.Core.InspectoresApp.v2/Components/Pages/Impresora/ImpresoraTunnel.raz
 
 Mecanismo: **navegación HTTP interceptada por el WebView** (no JS interop).
 
-- `GDA.Core.InspectoresApp.v2/Services/PrintService.cs:33-44` (origin/Homologacion): lee el parámetro `GDA_CORE_Enpoint`, cifra el id con `NgCrypto`, arma `{baseUrl}/Print/{PrintActaById|PrintCausaById}?id=...` y navega a `ImpresoraTunnel?action=print&urlActionPrint={url codificada}` con `forceLoad: true` (41-43). Comentario 30-31: "la App MAUI intercepta ImpresoraTunnel, pide el JSON a la API ... y lo envía a la impresora térmica".
+- `<app-web>.InspectoresApp.v2/Services/PrintService.cs:33-44` (origin/Homologacion): lee el parámetro `<APP>_Enpoint`, cifra el id con `<Org>Crypto`, arma `{baseUrl}/Print/{PrintActaById|PrintCausaById}?id=...` y navega a `ImpresoraTunnel?action=print&urlActionPrint={url codificada}` con `forceLoad: true` (41-43). Comentario 30-31: "la App MAUI intercepta ImpresoraTunnel, pide el JSON a la API ... y lo envía a la impresora térmica".
 - Invocadores: `Components/Pages/Actas/ActaCreada.razor.cs:98` y `DetalleActa.razor.cs:89` (`_PrintService.PrintActa`); registro `Program.cs:81`.
-- Lado app: `GDA.Core.APP/GDA.Core.APP/Services/UrlManagerService.cs:109-111` extrae `urlActionPrint`; `Services/PrintCoordinator.cs:53-62` lo consume (error `DocumentoInvalido` si falta). `Services/Printing/DTOs/PrintDocument.cs:7`: el JSON obtenido pasa a `MotorDsl.IDocumentEngine.Render`.
+- Lado app: `<app>/<app>/Services/UrlManagerService.cs:109-111` extrae `urlActionPrint`; `Services/PrintCoordinator.cs:53-62` lo consume (error `DocumentoInvalido` si falta). `Services/Printing/DTOs/PrintDocument.cs:7`: el JSON obtenido pasa a `MotorDsl.IDocumentEngine.Render`.
 - El contrato web→app es **agnóstico del transporte**: sólo viaja la URL del documento. La elección Bluetooth/impresora vive en la app.
 
 ## 4. ¿Qué cambiar en la web para un transporte `pax`?
@@ -41,6 +41,6 @@ Mecanismo: **navegación HTTP interceptada por el WebView** (no JS interop).
 
 ## 5. Contexto: PosicionGps.cs (bug GPS)
 
-- En origin/Homologacion vive en `Notions.Core.Services.GDI/Utils/PosicionGps.cs` (último commit b06a159f, 2026-11-17); en el worktree i7infra-devcontainer está en `GDA.Core.InspectoresApp.v2/Utils/PosicionGps.cs`.
+- En origin/Homologacion vive en `<org>.Core.Services.<modulo>/Utils/PosicionGps.cs` (último commit b06a159f, 2026-11-17); en el worktree `<equipo-1>-devcontainer` está en `<app-web>.InspectoresApp.v2/Utils/PosicionGps.cs`.
 - Lee el JSON `{"Latitude","Longitude"}` que la app MAUI inyecta en el input oculto `idInputCoordenada` (líneas 8-10); devuelve null ante vacío/"null"/JSON inválido/0,0 (24-55) para no cortar el circuito Blazor (comentario 12-13).
 - Relación con PAX: **Inferido** — la app debe seguir inyectando la coordenada igual en el A910S; ajeno a la impresión.

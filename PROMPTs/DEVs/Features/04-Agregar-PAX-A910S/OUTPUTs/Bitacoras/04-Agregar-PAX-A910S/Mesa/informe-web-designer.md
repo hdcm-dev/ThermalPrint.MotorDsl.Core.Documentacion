@@ -17,10 +17,10 @@ Feature 04, PAX A910S. Fase de sólo lectura: no toqué código ni hice commits.
 - La alternativa de actualizar la WebView del equipo está descartada, porque la 155 no entra en API 31 (R4 §5) y el equipo no tiene Play.
 
 ## 3. Rama y clon
-- Repo: `Ng/Ng-Core/GDA/GDA.Core`, remoto `Notions-Group-SA/GDA.Core`, base `origin/Homologacion` en c89f8588 (R5 §3-5).
-- El clon `Issue699-GDA.Core` ya no existe en disco (R5 §1). Hay que corregir esa entrada de la memoria.
+- Repo: `<app-web>`, remoto `<org>/<app-web>`, base `origin/Homologacion` en c89f8588 (R5 §3-5).
+- El clon `Issue699-<app-web>` ya no existe en disco (R5 §1). Hay que corregir esa entrada de la memoria.
 - La rama `Homologacion` local está atrasada (49a1427e). Antes de cualquier commit hay que traer el remoto con `pull --ff-only`.
-- La regla «GDA.Core web: sólo commit y push desde Homologacion» choca con el fix 08, que vive en una rama aparte. Lo tiene que decidir el PO.
+- La regla «`<app-web>` web: sólo commit y push desde Homologacion» choca con el fix 08, que vive en una rama aparte. Lo tiene que decidir el PO.
 
 ## 4. Con dispositivo y sin dispositivo
 - Sin dispositivo: verificar que la web no cambia (ya está hecho) y probar el fix 08 sobre la escena Pay-Android con WebView 91 (R4 §1-3).

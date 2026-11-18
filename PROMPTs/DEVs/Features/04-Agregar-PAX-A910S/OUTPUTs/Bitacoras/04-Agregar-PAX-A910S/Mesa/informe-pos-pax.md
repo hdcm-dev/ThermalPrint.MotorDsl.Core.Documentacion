@@ -2,7 +2,7 @@
 
 Fecha: 2026-11-17. Feature 04. Fase de sólo lectura. No se modificó código, no hubo commits ni cambios de infraestructura.
 
-Abreviaturas: `MAT` = `Ng/Ng-Media/Instaladores/SDK-PayDroid-A910S`. `R1`…`R5` = informes en `../Relevamiento/`. Las líneas `IPrinter.java:N` y `NeptuneLiteUser:N` son del javadoc del SDK 4.15.00, citadas en R3.
+Abreviaturas: `MAT` = `{almacén-de-instaladores}/SDK-PayDroid-A910S`. `R1`…`R5` = informes en `../Relevamiento/`. Las líneas `IPrinter.java:N` y `NeptuneLiteUser:N` son del javadoc del SDK 4.15.00, citadas en R3.
 
 ## 1. Propuesta
 
@@ -81,10 +81,10 @@ Los códigos de estado se transportan como `PrinterHardwareException(code)`, que
 ### 1.8 Firma PAX, Release y Debug
 
 - **Debug** (nuestro equipo): adb e instalación directa (`MAT/README.md:42`).
-- **Release** (el equipo de la tester): PayDroid verifica la firma PAX del APK y de las `.so` (`MAT/README.md:43`). Firma Leandro, por intermedio de Martín (`MAT/README.md:44`).
-  - Consecuencia: el APK para Release tiene que estar **terminado y con las `.so` dentro** antes de mandarlo. Cada cambio vuelve a pasar por Leandro. Conviene juntar los cambios y mandar un candidato por iteración.
+- **Release** (el equipo de la tester): PayDroid verifica la firma PAX del APK y de las `.so` (`MAT/README.md:43`). Firma `<firmante-PAX>`, por intermedio de `<intermediario>` (`MAT/README.md:44`).
+  - Consecuencia: el APK para Release tiene que estar **terminado y con las `.so` dentro** antes de mandarlo. Cada cambio vuelve a pasar por `<firmante-PAX>`. Conviene juntar los cambios y mandar un candidato por iteración.
 - La APK firmada que se recibió está firmada con `CN=Android Debug` (`MAT/README.md:65`). **Inferido**: la firma PAX se agrega por encima de la firma Android; no se ve con `keytool`.
-- Formato: hoy la app genera un `aab` (R2 punto 18). Para Leandro hace falta un **APK** (`-p:AndroidPackageFormat=apk`, como en `dev.sh`, R2 punto 22).
+- Formato: hoy la app genera un `aab` (R2 punto 18). Para `<firmante-PAX>` hace falta un **APK** (`-p:AndroidPackageFormat=apk`, como en `dev.sh`, R2 punto 22).
 - ABIs del APK para PAX: sólo `android-arm64` y `android-arm`. Así se evitan las `.so` x86, que no sirven en el equipo, y baja el tamaño (la APK actual pesa 99,9 MB con 4 ABIs, `MAT/README.md:63-64`).
 
 ### 1.9 x86 y emulador
@@ -116,7 +116,7 @@ Los códigos de estado se transportan como `PrinterHardwareException(code)`, que
 5. Medir el ancho con la regla de 576 px (§1.6) y confirmar los dpi.
 6. Imprimir un acta real larga (límite de alto) y forzar sin papel y tapa abierta.
 7. Ver si `com.pax.permission.PRINTER` es obligatorio (hacer la prueba sin declararlo).
-8. Ciclo de firma Release con Leandro: tiempo y medio de envío (pendiente en `MAT/README.md:51`).
+8. Ciclo de firma Release con `<firmante-PAX>`: tiempo y medio de envío (pendiente en `MAT/README.md:51`).
 
 ## 3. Riesgos
 

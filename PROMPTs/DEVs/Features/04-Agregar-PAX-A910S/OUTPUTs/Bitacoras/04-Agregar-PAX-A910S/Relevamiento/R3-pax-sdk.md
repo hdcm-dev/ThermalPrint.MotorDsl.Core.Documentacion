@@ -2,16 +2,16 @@
 
 Fecha: 2026-11-17. Fase de sólo lectura. Abreviaturas de rutas:
 
-- `MAT` = `Ng/Ng-Media/Instaladores/SDK-PayDroid-A910S`
+- `MAT` = `{almacén-de-instaladores}/SDK-PayDroid-A910S`
 - `SDK` = `MAT/000. Herramientas paydroid/sdk/libs + API doc/NeptuneLiteApi_V4.15.00_20250606.zip`
-- `EXT` = `/vm/claude-tmp/claude-1000/pax-sdk-extract` (extracción temporal del zip, fuera del repo)
+- `EXT` = `{tmp-de-sesiones}/pax-sdk-extract` (extracción temporal del zip, fuera del repo)
 - Las líneas `IPrinter.java:N` son las del código fuente que trae el javadoc en `EXT/doc/en/src-html/com/pax/dal/IPrinter.html`.
 
 ## 1. Inventario del material
 
 | Pieza | Evidencia |
 |---|---|
-| README del material (lo escribió una sesión anterior): describe el SDK, NeptuneService, la firma vía Leandro y el análisis de la APK firmada | `MAT/README.md` |
+| README del material (lo escribió una sesión anterior): describe el SDK, NeptuneService, la firma vía `<firmante-PAX>` y el análisis de la APK firmada | `MAT/README.md` |
 | SDK NeptuneLite 4.15.00 (zip de 45 MB, 1117 entradas) | `unzip -l SDK` → `45103306 … 1117 files` |
 | NeptuneService 3.10.02 (APK) | `MAT/000. Herramientas paydroid/sdk/service/NeptuneService V3.10.02 20250109.apk` |
 | Guía del IDE 1.0.4 y Paydroid_Training (PDF) | leídos con `pdftotext -layout` |
@@ -154,7 +154,7 @@ Fuente: `EXT/doc/en/src-html/com/pax/neptunelite/api/NeptuneLiteUser.html`.
 
 ## 9. Lo que hace falta para el binding .NET Android del `.jar` (Inferido, conocimiento de la plataforma; no hay binding previo en la app)
 
-`grep AndroidLibrary|AndroidJavaLibrary|EmbeddedJar` en los csproj de GDA.Core.APP no encuentra nada.
+`grep AndroidLibrary|AndroidJavaLibrary|EmbeddedJar` en los csproj de `<app>` no encuentra nada.
 
 1. **Proyecto de binding.** Crear un proyecto `net9.0-android` (o el TFM de la app) con `<AndroidLibrary Include="NeptuneLiteApi_V4.15.00_20250606.jar" />`. Genera los wrappers C#. Es Java 8, así que el bytecode es compatible.
 2. **`.so` nativas.** Agregarlas como `<AndroidNativeLibrary Include="…/arm64-v8a/libDeviceConfig.so" Abi="arm64-v8a" />` y la de armeabi con `Abi="armeabi-v7a"`, siguiendo el renombre que indica la guía del IDE. Como mínimo hace falta `libDeviceConfig`. **Inferido:** conviene incluir también `libpaxcanvas` (arm64).

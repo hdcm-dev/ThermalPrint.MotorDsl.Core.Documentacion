@@ -52,7 +52,7 @@ El arranque de la escena necesita turno (`flock` y `recurso.sh`; R4 §6). Eso es
 
 ### N4. Equipo físico A910S (checklist; no se da por cerrado sin evidencia)
 1. Identificación:
-   - `adb devices` por USB en hpdev (`lsusb`: vendor id);
+   - `adb devices` por USB en `<equipo-2>` (`lsusb`: vendor id);
    - regla udev nueva. **Es un cambio de infraestructura y pide autorización del PO** (R4 §16).
    - Alternativa sin tocar infraestructura: adb por la PC del PO (R4 §17).
 2. `getprop ro.build.version.sdk`, `ro.build.version.release`, versión de PayDroid y `ro.product.cpu.abilist`.
@@ -72,7 +72,7 @@ El arranque de la escena necesita turno (`flock` y `recurso.sh`; R4 §6). Eso es
 10. Pruebas en Release:
     - ProGuard o R8 conserva `com.pax.**` (R3 §5);
     - las `.so` cargan con la firma de Release.
-    La firma con Leandro queda pendiente.
+    La firma con `<firmante-PAX>` queda pendiente.
 11. Permiso `com.pax.permission.PRINTER`: comportamiento con él y sin él (R3 §6).
 
 ## 2. Criterios de aceptación
@@ -84,7 +84,7 @@ El arranque de la escena necesita turno (`flock` y `recurso.sh`; R4 §6). Eso es
 - CA5: en el A910S, la impresión real del acta es legible, sin recorte a la derecha y con el ancho medido documentado.
 - CA6: WebView del A910S ≥ 119, o en su defecto un riesgo aceptado por escrito por el PO.
 - CA7: el build Release imprime, con ProGuard y firma.
-- CA8: el conocimiento `Knowledge-Test-com.gdi.coredesa.inspector-App-PayDroid.md` contiene los checklists N3 y N4, con evidencias enlazadas.
+- CA8: el conocimiento `Knowledge-Test-com.<org>.coredesa.inspector-App-PayDroid.md` contiene los checklists N3 y N4, con evidencias enlazadas.
 
 ## 3. Riesgos (QA)
 - La WebView del A910S es desconocida. Si es < 94, el inspector web no carga, aunque la impresión funcione. Es el riesgo mayor, porque no depende de esta feature.

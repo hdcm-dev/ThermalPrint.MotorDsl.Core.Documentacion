@@ -20,22 +20,22 @@ Fecha: 2026-11-17. Verificador escéptico, con la lente de evidencia. Fase de s�
 | El perfil 58HB6 está fijo | `PrintCoordinator.cs:90-93` |
 | Patrón `Refresco` | `WhiteLabel.props:101` |
 | `TRIO_PROPS` | `cd-main-android-build.yml:294` |
-| `RuntimeIdentifiers` incluye x86 y x64 | `GDA.Core.APP.csproj:54` |
-| La app consume paquetes NuGet 1.0.17 | `GDA.Core.APP.csproj:212-220` |
-| Ningún manifiesto declara Bluetooth | `grep -rli bluetooth Recursos GDA.Core.APP/Platforms Utils` no devuelve nada |
+| `RuntimeIdentifiers` incluye x86 y x64 | `<app>.csproj:54` |
+| La app consume paquetes NuGet 1.0.17 | `<app>.csproj:212-220` |
+| Ningún manifiesto declara Bluetooth | `grep -rli bluetooth Recursos <app>/Platforms Utils` no devuelve nada |
 | Rama de la impresora única y textos «por Bluetooth» | `PrinterOverlayViewModel.cs:120,149-150,180` |
 | El catálogo de errores compara texto | `PrinterErrorCatalog.cs:136-147` |
 | Build en el devcontainer de la app | `.devcontainer/dev.sh:103-104` |
 | Homologacion | `origin/Homologacion` = c89f8588 y la rama local = 49a1427e |
 | 6970c6b3 sólo está en `origin/fix08-blazor-web-compat-webview-postnet` | `git branch -r --contains` |
 | `PrintService.cs` arma la URL de `ImpresoraTunnel` | `PrintService.cs:30,41` en `origin/Homologacion` |
-| No existe un clon `Issue699-GDA.Core` | `ls Ng/Ng-Core/GDA/` sólo muestra GDA.Core, GDA.Core.Documentacion y GDA.Core-i7infra-devcontainer. La tarea computada decía que existía, y eso es falso |
+| No existe un clon `Issue699-<app-web>` | `ls <app-web>/` sólo muestra `<app-web>`, `<app-web>.Documentacion` y `<app-web>-<equipo-1>-devcontainer`. La tarea computada decía que existía, y eso es falso |
 | Líneas de `IPrinter.java` (src-html del zip NeptuneLiteApi 4.15.00) | 220: menos de 30.000 puntos; 299: `getStatus`; 438-445: «Cannot mix»; 447: `print(Bitmap, IPinterListener)`; 601: recorte por ancho |
 | `NeptuneLiteUser` | :71 tiene el chequeo comentado; :134-136 lanza `LOAD DAL ERR` |
 | `.so` | Sólo vienen para `arm64-v8a` y `armeabi`, ninguna para x86. `libpaxcanvas` sólo está en arm64 |
 | `com.pax.ipp.neptune` | No aparece en el SDK: queda bien marcado como **Inferido** |
 | udev y adb | `/etc/udev/rules.d/` sólo tiene `51-android-motorola.rules` (y vboxdrv); adb es la 29.0.6 |
-| `windows-i7infra` | Sus `devices` son sólo `/dev/kvm` y `/dev/net/tun` (`docker-compose.yml:18-20`) |
+| `windows-<equipo-1>` | Sus `devices` son sólo `/dev/kvm` y `/dev/net/tun` (`docker-compose.yml:18-20`) |
 | SCN-PAY | :212-213: la WebView 155 no instala; :264-265: `static{}`; :269: GMS; :315: WebView real desconocida |
 | Recursos | :354: acceso por adb remoto; `KIT/comun.sh:37-50`, citado en App-Android:282-283 |
 
