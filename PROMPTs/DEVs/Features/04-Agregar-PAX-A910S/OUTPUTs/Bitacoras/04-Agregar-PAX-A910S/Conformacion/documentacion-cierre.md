@@ -13,4 +13,10 @@ Conocimiento: `Knowledge-Conformacion-Pull-Request-Automatico` 2.0. Delegación:
 - **Autoría:** `noreply` (`git -c user.email=…noreply…`), credencial `fernandofilipuzzi-utn` por `git credential fill`, git por `GIT_ASKPASS` con variable de entorno, curl por `-K` con archivo 0600; borrados al terminar.
 
 ## Resultado
-(se completa tras el merge)
+- **Ciclo cerrado —** cierre de la Feature 04 en este repo
+- **PR:** https://github.com/hdcm-dev/ThermalPrint.MotorDsl.Core.Documentacion/pull/5 — **fusionado por el agente**, commit de merge `fdeac4a`
+- **Guarda:** estado `clean`; controles de `f2efb7c`: 1 en éxito (Verificar 44228606528)
+- **Rama remota:** borrada y comprobada (DELETE 204, GET 404)
+- **Local:** `main` al día (ff-only), rama local y worktree borrados, `f2efb7c` alcanzable. Para el ff, las copias locales sin ofuscar de los tres registros publicados se reemplazaron por las publicadas; la diferencia (sólo las redacciones) quedó en el registro local de cierre
+- **Controles del commit de merge:** 1 en éxito (Verificar 44228667980)
+- **Sigue:** este segundo PR asienta el folio 31 (#16 fusionado) y este resultado
