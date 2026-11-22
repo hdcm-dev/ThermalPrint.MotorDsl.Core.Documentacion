@@ -9,6 +9,12 @@ generados conforme al Marco de Documentación de Software.
 
 ## [Unreleased]
 
+### Eliminado
+
+- **Feature 04 (PAX A910S) fuera de este repositorio** (2026-11-22): `PROMPTs/DEVs/Features/04-Agregar-PAX-A910S/`
+  (prompt, plan, núcleos, bitácoras y expedientes) pasa a una documentación privada.
+  Esta documentación pública queda sólo con la librería.
+
 ### Cambiado
 
 - **`ia-db/` regenerada desde cero (versión 3.0)** sobre `PrintThermal_Motor_Maui` @`0f8413d`
@@ -84,7 +90,7 @@ generados conforme al Marco de Documentación de Software.
 ### Seguridad
 
 - **Datos privados fuera de la punta pública** (2026-11-18): en las bitácoras, núcleos,
-  expedientes y relevamientos de `PROMPTs/DEVs/Features/04-Agregar-PAX-A910S/OUTPUTs/` y en
+  expedientes y relevamientos de `PROMPTs/DEVs/Features/04-Agregar-PAX-A910S/OUTPUTs/` (retirada el 2026-11-22) y en
   `reporte-derivas.md`, los nombres de la app consumidora y de su sistema web, la organización, los
   repositorios privados, los clientes, los servicios privados, los equipos, las IP, las rutas
   locales, la serie del dispositivo y los nombres de terceros pasan a marcadores (`<app>`,

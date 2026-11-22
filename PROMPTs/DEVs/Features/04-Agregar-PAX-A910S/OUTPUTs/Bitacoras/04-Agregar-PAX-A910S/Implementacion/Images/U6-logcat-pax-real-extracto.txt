@@ -1,3 +1,0 @@
-11-17 23:21:23.843  4565  4565 I ndk_translation: Initialized NDK translation (aarch64), version 0.2.3
-11-17 23:21:49.084  4565  4565 D app_process64: [PRINT-PAX] NeptuneService (com.pax.ipp.neptune) instalado: False
-11-17 23:21:49.084  4565  4565 I PRINT-PAX: NeptuneService (com.pax.ipp.neptune) instalado: False
